@@ -1,0 +1,25 @@
+# Entornos virtuales de Python
+.venv/
+env/
+venv/
+ENV/
+
+# Secretos y credenciales
+.env
+*.env.local
+
+# Caché y temporales
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+
+# Datos procesados pesados y base de datos vectorial
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/vector_store/*
+!data/vector_store/.gitkeep
+results/*
+!results/.gitkeep

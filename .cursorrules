@@ -1,0 +1,5 @@
+# Cursor Rules - PhytoRAG-Tropical
+- Siempre consulta y respeta AGENTS.md y docs/04-workflow-y-guardrails.md.
+- NUNCA hagas commits a la rama `main`. Usa ramas `feature/issue-<NUMERO>-<nombre>`.
+- Todo código de Python debe tener tipado estricto con Pydantic y formatearse con `ruff`.
+- En respuestas agronómicas: garantizar cero alucinaciones y citar siempre el registro COFEPRIS / norma OMRI oficial.
