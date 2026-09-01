@@ -1,0 +1,14 @@
+# Reglas de Propiedad de Código (CODEOWNERS) - PhytoRAG-Tropical
+# Los archivos de gobernanza, workflows y guías solo pueden ser aprobados/modificados por el Director.
+
+# Gobernanza y reglas de Agentes de IA
+/AGENTS.md @cfcortesmx
+/.cursorrules @cfcortesmx
+/CLAUDE.md @cfcortesmx
+/.github/ @cfcortesmx
+/.github/workflows/ @cfcortesmx
+
+# Protocolo y guías base
+/docs/01-guia-estudiantes.md @cfcortesmx
+/docs/02-protocolo-experimental.md @cfcortesmx
+/docs/04-workflow-y-guardrails.md @cfcortesmx

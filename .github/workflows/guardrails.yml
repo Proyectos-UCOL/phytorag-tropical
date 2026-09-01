@@ -1,0 +1,47 @@
+name: 🛡️ Strict Guardrails & Governance Enforcement
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check-governance-integrity:
+    name: Verificar Integridad de Archivos de Gobernanza
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Comprobar que no se modifiquen archivos de gobernanza
+        run: |
+          echo "🔍 Verificando archivos modificados en el Pull Request..."
+          
+          # Archivos protegidos que los estudiantes o sus agentes no pueden modificar
+          PROTECTED_FILES="AGENTS.md .cursorrules CLAUDE.md .github/CODEOWNERS .github/workflows/ docs/04-workflow-y-guardrails.md docs/01-guia-estudiantes.md"
+          
+          # Obtener lista de archivos modificados en este PR contra origin/main
+          CHANGED_FILES=$(git diff --name-only origin/main HEAD)
+          
+          VIOLATIONS=""
+          for file in $CHANGED_FILES; do
+            for protected in $PROTECTED_FILES; do
+              if [[ "$file" == "$protected"* ]]; then
+                VIOLATIONS="$VIOLATIONS\n - $file"
+              fi
+            done
+          done
+          
+          # Si el autor del PR es cfcortesmx se permite, de lo contrario falla
+          PR_AUTHOR="${{ github.actor }}"
+          if [ -n "$VIOLATIONS" ] && [ "$PR_AUTHOR" != "cfcortesmx" ]; then
+            echo "❌ ERROR: Violación de Guardrails de Gobernanza."
+            echo "El estudiante/agente intentó modificar archivos protegidos de solo lectura:"
+            echo -e "$VIOLATIONS"
+            echo ""
+            echo "Los archivos de gobernanza, workflows y reglas de agentes solo pueden ser modificados por el Dr. Carlos Flores (@cfcortesmx)."
+            exit 1
+          else
+            echo "✅ Verificación de gobernanza exitosa. Ningún archivo protegido fue alterado."
+          fi

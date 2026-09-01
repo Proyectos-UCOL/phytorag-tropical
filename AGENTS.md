@@ -45,8 +45,17 @@ python src/app.py
 
 ---
 
-## 🚫 3. Reglas y Guardrails Innegociables (Strict Rules)
+## 🚫 3. Reglas y Guardrails Innegociables (Modo Strict)
 
+0. **🔒 ARCHIVOS PROTEGIDOS Y DE SOLO LECTURA (INMUTABILIDAD ABSOLUTA):**
+   - El agente de IA tiene **ESTRICTAMENTE PROHIBIDO** modificar, reescribir, borrar o incluir en un commit cambios a:
+     * `AGENTS.md`
+     * `.cursorrules`
+     * `CLAUDE.md`
+     * `.github/**` (incluyendo CODEOWNERS y workflows)
+     * `docs/04-workflow-y-guardrails.md`
+     * `docs/01-guia-estudiantes.md`
+   - Cualquier Pull Request que contenga modificaciones a estos archivos será **automáticamente rechazado** por el CI de GitHub. Solo el Dr. Carlos Flores (`@cfcortesmx`) tiene permisos de edición sobre estos archivos.
 1. **NUNCA hagas commits directos a `main`:**
    - Todo trabajo se realiza en ramas de feature siguiendo la convención:
      `feature/issue-<NUMERO>-<descripcion-corta>` (ej. `feature/issue-01-ingesta-senasica`).
