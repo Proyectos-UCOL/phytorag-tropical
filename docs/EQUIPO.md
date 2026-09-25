@@ -11,8 +11,8 @@
 
 | Nombre | Correo institucional | GitHub | Rol en el proyecto |
 | :--- | :--- | :--- | :--- |
-| Jesús Israel Gavilanes Borjas | jgavilanes0@ucol.mx | [@jgavilanes0](https://github.com/jgavilanes0) | Desarrollo RAG Híbrido |
-| Sofía Renata Silva Méndez | ssilva14@ucol.mx | [@sofiarenasm](https://github.com/sofiarenasm) | Desarrollo RAG Híbrido |
+| Ricardo Mercado López | rmercado0@ucol.mx | [@ricardo-lop](https://github.com/ricardo-lop) | Ingesta y Curaduría de Corpus (Issue #1) |
+| Sofía Renata Silva Méndez | ssilva14@ucol.mx | [@sofiarenasm](https://github.com/sofiarenasm) | Desarrollo RAG Híbrido (Issue #2) |
 
 ---
 
@@ -27,3 +27,4 @@
 | Fecha | Temas tratados | Acuerdos / Compromisos |
 | :--- | :--- | :--- |
 | 2026-09-10 | Primera reunión — Arranque del proyecto, onboarding técnico y marco de trabajo. | • Invitaciones de GitHub enviadas a `@jgavilanes0` y `@sofiarenasm`.<br/>• **Jesús:** Asignado a **Issue #1** (Ingesta y curaduría del corpus fitosanitario oficial COFEPRIS/OMRI en `feature/issue-01-ingesta-corpus`).<br/>• **Sofía:** Asignada a **Issue #2** (Motor RAG Híbrido ChromaDB + BM25 en `feature/issue-02-motor-rag`).<br/>• Acuerdo de política Git: 1 alumno = 1 rama = 1 PR hacia `main`. Revisión semanal los jueves 11:00 AM. |
+| 2026-09-25 | Relevo en el equipo y reasignación de Issue #1. | • Salida de Jesús Israel Gavilanes Borjas del proyecto.<br/>• Incorporación de **Ricardo Mercado López** (`rmercado0@ucol.mx`, `@ricardo-lop`) en su lugar.<br/>• Reasignación de **Issue #1** (Ingesta y curaduría del corpus) a Ricardo en rama `feature/issue-01-ingesta-corpus`.<br/>• Invitación enviada en GitHub a `@ricardo-lop` y revocada la de `@jgavilanes0`. |
