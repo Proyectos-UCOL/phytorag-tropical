@@ -5,36 +5,49 @@ Director: Dr. Carlos Flores
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Garantizar que la raíz del proyecto esté en sys.path para ejecuciones directas
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from dotenv import load_dotenv
 
 load_dotenv()
 
 app = FastAPI(
     title="PhytoRAG-Tropical API",
     description="Consultor Agronómico Especializado en Vademécum Oficial y Cumplimiento Normativo",
-    version="0.1.0"
+    version="0.1.0",
 )
 
 
 class ConsultaFitosanitaria(BaseModel):
     """Modelo de entrada para la consulta del agricultor o agrónomo."""
-    cultivo: str = Field(..., description="Cultivo analizado (ej. Limon, Mango, Papaya)")
-    problema_o_sintoma: str = Field(..., description="Plaga, hongo o síntoma observado (ej. Cancro, Trips, HLB)")
+
+    cultivo: str = Field(
+        ..., description="Cultivo analizado (ej. Limon, Mango, Papaya)"
+    )
+    problema_o_sintoma: str = Field(
+        ..., description="Plaga, hongo o síntoma observado (ej. Cancro, Trips, HLB)"
+    )
     regimen: str = Field(
         default="convencional",
-        description="Régimen de producción: 'convencional', 'organico_omri' o 'exportacion_usda'"
+        description="Régimen de producción: 'convencional', 'organico_omri' o 'exportacion_usda'",
     )
-    etapa_fenologica: Optional[str] = Field(
+    etapa_fenologica: str | None = Field(
         default=None,
-        description="Etapa del cultivo (ej. Floración, Brote vegetativo, Cosecha)"
+        description="Etapa del cultivo (ej. Floración, Brote vegetativo, Cosecha)",
     )
 
 
 class RecomendacionTratamiento(BaseModel):
     """Esquema de salida estructurada de la recomendación fitosanitaria."""
+
     producto_comercial: str
     ingrediente_activo: str
     registro_sanitario_cofepris: str
@@ -54,31 +67,53 @@ def estado_servicio():
         "estado": "operativo",
         "director": "Dr. Carlos Flores",
         "institucion": "Facultad de Telemática — Universidad de Colima",
-        "documentacion": "/docs"
+        "documentacion": "/docs",
     }
+
+
+try:
+    from src.rag_engine import MotorPhytoRAG
+except ModuleNotFoundError:
+    from rag_engine import MotorPhytoRAG
+
+# Instancia global del Motor RAG Híbrido
+motor_rag = MotorPhytoRAG()
 
 
 @app.post("/consultar", response_model=RecomendacionTratamiento)
 def consultar_fitosanidad(consulta: ConsultaFitosanitaria):
-    """Endpoint principal para consultar recomendaciones fitosanitarias."""
-    # Este es el endpoint inicial que implementarán los estudiantes integrando rag_engine.py
-    return RecomendacionTratamiento(
-        producto_comercial="Oxicloruro de Cobre 50% PH (Ejemplo Semilla)",
-        ingrediente_activo="Oxicloruro de Cobre",
-        registro_sanitario_cofepris="RSCO-FUNG-0301-301-002-050",
-        dosis_autorizada="2.0 a 3.0 kg/ha",
-        intervalo_seguridad_dias=0,
-        aprobacion_organica_omri=True,
-        compatible_exportacion_usda=True,
-        recomendacion_agronomica="Aplicar en aspersión foliar al detectar los primeros síntomas de cancro.",
-        fragmento_oficial_citado="Autorizado para limonero contra Cancro Bacteriano (Xanthomonas citri) a dosis de 2-3 kg/ha.",
-        fuente_documental="Catálogo Oficial COFEPRIS / Ficha Técnica DEAQ 2026"
-    )
+    """
+    Endpoint principal para consultar recomendaciones fitosanitarias.
+    Realiza recuperación híbrida (BM25 + ChromaDB) y generación con Gemini.
+    """
+    try:
+        # Construir consulta contextualizada
+        query = f"Cultivo: {consulta.cultivo}. Problema: {consulta.problema_o_sintoma}."
+        if consulta.etapa_fenologica:
+            query += f" Etapa: {consulta.etapa_fenologica}."
+
+        # 1. Recuperar fragmentos normativos oficiales
+        contexto_recuperado = motor_rag.recuperar_documentos(query=query, top_k=3)
+
+        # 2. Generar dictamen fitosanitario con guardrails deterministas
+        resultado = motor_rag.generar_recomendacion(
+            consulta_texto=query,
+            contexto=contexto_recuperado,
+            regimen=consulta.regimen,
+        )
+
+        return RecomendacionTratamiento(**resultado)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al procesar la consulta fitosanitaria con el Motor RAG: {e!s}",
+        ) from e
 
 
 if __name__ == "__main__":
     import uvicorn
+
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
-    print(f"🚀 Iniciando servidor PhytoRAG-Tropical en http://{host}:{port}")
+    port = int(os.getenv("PORT", "8000"))
+    print(f"[INICIO] Servidor PhytoRAG-Tropical en http://{host}:{port}")
     uvicorn.run(app, host=host, port=port)
