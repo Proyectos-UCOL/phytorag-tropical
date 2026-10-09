@@ -1857,7 +1857,8 @@ def crear_instrucciones_paquete() -> str:
    no debe cargarse al índice RAG. `revision_documental_exalt.json` contiene el
    cotejo asistido y `busqueda_documental_exalt.json` añade las citas de la ficha
    técnica de Corteva, sus límites y el documento que falta para levantar la
-   cuarentena.
+   cuarentena. `investigacion_documental_bloqueos.json` registra las fuentes OMRI,
+   LPO, Exalt y Engeo consultadas para el Issue #1.
 6. La revisión asistida por agente no equivale a firma, aprobación humana ni
    autorización regulatoria. Exalt solo podrá aprobarse cuando evidencia completa
    y consistente provenga de una etiqueta oficial verificable; si una fuente cambia
@@ -1873,12 +1874,20 @@ el mecanismo de transparencia aplicable. La solicitud recomendada y su contenido
 están en `busqueda_documental_exalt.json` y no se ha enviado.
 
 SENASICA se conserva como información epidemiológica general y Engeo sigue pendiente
-por su inconsistencia de unidades. El alcance pendiente del Issue #1 también incluye
-los catálogos oficiales OMRI/LPO, que no están disponibles ni verificados en este
-paquete. Las fichas son elaboradas por PhytoRAG-Tropical y no son emitidas ni
-aprobadas por COFEPRIS. No se infiere aprobación orgánica ni compatibilidad de
-exportación. Este paquete no constituye una recomendación agronómica ni demuestra
-“cero alucinaciones”.
+por su inconsistencia de unidades; la ficha técnica informativa consultada no es el
+documento que autoriza el uso. Se incluyen las listas OMRI NOP y COR descargadas el
+2026-10-08, la Ley de Productos Orgánicos y su Reglamento, los Lineamientos originales
+del DOF del 2013-10-29, la versión de los Lineamientos que reproduce el Anexo 1
+publicada el 2020-06-08 y la modificación del Anexo 1 publicada el 2023-05-02.
+OMRI NOP/COR no equivale a la LPO mexicana, y ninguna de estas fuentes acredita por
+sí sola certificación orgánica de Exalt o Engeo. No se verificó una versión
+consolidada posterior a la modificación de 2023. La conversión HTML del DOF advierte
+que puede omitir contenido; su versión digitalizada debe consultarse para confirmar
+el alcance normativo. El estado, hashes y límites de estas consultas están en
+`investigacion_documental_bloqueos.json`. Las fichas son
+elaboradas por PhytoRAG-Tropical y no son emitidas ni aprobadas por COFEPRIS. No se
+infiere aprobación orgánica ni compatibilidad de exportación. Este paquete no
+constituye una recomendación agronómica ni demuestra “cero alucinaciones”.
 """
 
 
@@ -1968,7 +1977,15 @@ def crear_manifiesto_y_paquete() -> Path:
         + "- Fecha de consulta COFEPRIS: desconocida; la captura solo muestra vigencia.\n"
         + "- SENASICA se conserva como información epidemiológica general; Engeo "
         + "sigue pendiente por inconsistencia de unidades.\n"
-        + "- OMRI/LPO sigue pendiente: no se incluyeron catálogos oficiales verificados.\n"
+        + "- Se incluyen listas OMRI NOP/COR del 2026-10-08, la Ley de Productos "
+        + "Orgánicos, su Reglamento, los Lineamientos DOF de 2013, su versión "
+        + "modificada de 2020 que reproduce el Anexo 1 y el cambio de ese Anexo "
+        + "de 2023; no acreditan certificación de producto ni equivalencia "
+        + "OMRI-LPO.\n"
+        + "- La consulta de texto de la lista LPO no sustituye el cotejo con su "
+        + "versión digitalizada; Exalt y Engeo permanecen sin aprobación orgánica.\n"
+        + "- `investigacion_documental_bloqueos.json` conserva URLs, hashes, "
+        + "hallazgos y límites de las fuentes consultadas.\n"
         + "- Aprobación humana: no registrada ni atribuida.\n"
     ]
     manifiesto_lineas.append(
