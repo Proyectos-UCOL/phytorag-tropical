@@ -9,6 +9,7 @@ import importlib.metadata
 import json
 import platform
 import re
+import subprocess
 import zipfile
 from datetime import datetime, timezone
 from enum import Enum
@@ -1920,9 +1921,22 @@ def crear_manifiesto_y_paquete() -> Path:
     )
     motivo_texto = informe.get("motivo_bloqueo", "Sin detalle de bloqueo.")
     commit_base = "454225a2958da55ed2961f19f173589c1272a7ed"
+    consulta_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        check=False,
+        cwd=PROJECT_ROOT,
+        text=True,
+    )
+    commit_paquete = (
+        consulta_commit.stdout.strip()
+        if consulta_commit.returncode == 0
+        else "no disponible (metadatos Git ausentes)"
+    )
     manifiesto_lineas = [
         "# Manifiesto de datos PhytoRAG-Tropical — M1\n\n"
-        + f"- Commit de código de partida verificado: `{commit_base}`.\n"
+        + f"- Commit base de datos/código verificado: `{commit_base}`.\n"
+        + f"- Commit de código incluido al generar este paquete: `{commit_paquete}`.\n"
         + f"- SHA-256 del código de ingesta ejecutado: `{hash_sha256(PROJECT_ROOT / 'src' / 'data_ingest.py')}`.\n"
         + f"- Python: `{platform.python_version()}`.\n"
         + f"- Estado de revisión asistida Exalt: **{estado_revision}**.\n"
