@@ -24,6 +24,19 @@ DATA_RAW = PROJECT_ROOT / "data" / "raw"
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 EXALT_LABEL = "Exalt_etiqueta_web_rev_2025.pdf"
 COFEPRIS_EXALT_EVIDENCE = "Consulta_COFEPRIS_Exalt.png"
+EXALT_CORTEVA_TECHNICAL_SHEET = "Exalt_ficha_tecnica_Corteva_Mex_2026.pdf"
+EXALT_CORTEVA_TECHNICAL_SHEET_URL = (
+    "https://www.corteva.com/content/dam/dpagco/corteva/la/mesoandean/mx/es/"
+    "files/2026/ficha-tecnica/F.T.%20Exalt%20Méx.%202026.pdf"
+)
+EXALT_CORTEVA_TECHNICAL_SHEET_SHA256 = (
+    "e651250baf6f1e6f56eb1a21069e809c9529e3487cf13d444f8ceb9b9c524b01"
+)
+EXALT_DOCUMENTARY_SEARCH_REPORT = "busqueda_documental_exalt.json"
+EXALT_DOCUMENTARY_SEARCH_DATE = "2026-10-09"
+COFEPRIS_EXALT_SEARCH_URL = (
+    "https://siipris03.cofepris.gob.mx/Resoluciones/Consultas/ConWebRegPlaguicida.asp"
+)
 EXALT_AGENT_REVIEWER = "GitHub Copilot coding agent"
 EXALT_AGENT_REVIEWED_AT = "2026-10-08T23:44:14-06:00"
 EXALT_REVIEW_REPORT = "revision_documental_exalt.json"
@@ -376,6 +389,7 @@ def cita_pdf(
     fin: str,
     sha256: str | None,
     alcance: str,
+    archivo: str = EXALT_LABEL,
 ) -> CitaEvidencia:
     """Extrae y valida una cita literal de una página concreta del PDF."""
     texto = paginas.get(numero_pagina, "")
@@ -392,13 +406,290 @@ def cita_pdf(
         )
     fragmento = texto[indice_inicio : indice_fin + len(fin)].strip()
     return CitaEvidencia(
-        archivo=EXALT_LABEL,
+        archivo=archivo,
         sha256=sha256,
         ubicacion=f"Página {numero_pagina}",
         fragmento=fragmento,
         metodo_verificacion="extraccion_textual_pdf",
         alcance=alcance,
     )
+
+
+def construir_informe_busqueda_documental_exalt(
+    paginas: dict[int, str] | None = None,
+    sha256_actual: str | None = None,
+) -> dict[str, Any]:
+    """Registra corroboración del fabricante sin tratarla como etiqueta autorizada."""
+    ruta_fuente = DATA_RAW / EXALT_CORTEVA_TECHNICAL_SHEET
+    if paginas is None and ruta_fuente.is_file():
+        lector = pypdf.PdfReader(str(ruta_fuente))
+        paginas = {
+            numero: pagina.extract_text() or ""
+            for numero, pagina in enumerate(lector.pages, start=1)
+        }
+    if sha256_actual is None:
+        sha256_actual = hash_sha256(ruta_fuente)
+
+    fuente_verificada = (
+        paginas is not None and sha256_actual == EXALT_CORTEVA_TECHNICAL_SHEET_SHA256
+    )
+
+    def cita(
+        numero_pagina: int,
+        inicio: str,
+        fin: str,
+        alcance: str,
+    ) -> dict[str, Any]:
+        if not fuente_verificada or paginas is None:
+            return {}
+        return cita_pdf(
+            paginas,
+            numero_pagina,
+            inicio,
+            fin,
+            sha256_actual,
+            alcance,
+            archivo=EXALT_CORTEVA_TECHNICAL_SHEET,
+        ).model_dump()
+
+    cita_registro = cita(
+        2,
+        "Registro Sanitario:",
+        "de plagas.",
+        "La ficha técnica del fabricante imprime el mismo número de registro; "
+        "esto no convierte la ficha en etiqueta autorizada.",
+    )
+    cita_concentracion = cita(
+        2,
+        "Ingredientes Activos:",
+        "Ingredientes Inertes:",
+        "Composición declarada en la ficha técnica; no especifica el tipo de formulación.",
+    )
+    cita_is = cita(
+        5,
+        "Intervalo de seguridad:",
+        "(SL) Sin límite.",
+        "Define el IS en días y explica el marcador; los valores por combinación "
+        "proceden de la tabla de la ficha técnica.",
+    )
+    cita_reentrada = cita(
+        5,
+        "Periodo de reentrada a las áreas tratadas:",
+        "4 horas.",
+        "Periodo de reentrada declarado por el fabricante en la ficha técnica.",
+    )
+    inicios_filas = {
+        "Limonero": (
+            "Limonero, Lima, Naranjo",
+            "cobertura del follaje.",
+        ),
+        "Mango": (
+            "Mango",
+            "600 L de agua/ha.",
+        ),
+        "Papayo": (
+            "Papayo",
+            "450-550 L de agua/ha.",
+        ),
+    }
+    fichas = []
+    for combinacion in EXALT_COMBINACIONES:
+        inicio, fin = inicios_filas[combinacion["cultivo"]]
+        cita_uso = cita(
+            4,
+            inicio,
+            fin,
+            "Fila de recomendaciones de uso de la ficha técnica de Corteva; "
+            "respaldo del fabricante, no etiqueta autorizada.",
+        )
+        fichas.append(
+            {
+                "id_registro": combinacion["id"],
+                "cultivo": combinacion["cultivo"],
+                "plaga": combinacion["problema_fitosanitario"],
+                "coincidencia_registro": {
+                    "valor": "RSCO-INAC-0103X-301-064-006",
+                    "resultado": (
+                        "coincide en la ficha técnica"
+                        if fuente_verificada
+                        else "no verificado: fuente ausente o hash distinto"
+                    ),
+                    "citas": [cita_registro] if cita_registro else [],
+                },
+                "cultivo_y_plaga": {
+                    "resultado": (
+                        "figuran en la fila del fabricante"
+                        if cita_uso
+                        else "no verificado: fuente ausente o hash distinto"
+                    ),
+                    "citas": [cita_uso] if cita_uso else [],
+                },
+                "dosis": {
+                    "valor": f"{combinacion['dosis_texto']} mL/ha",
+                    "resultado": (
+                        "figura en la ficha técnica del fabricante; no se valida "
+                        "como uso autorizado"
+                        if cita_uso
+                        else "no verificado: fuente ausente o hash distinto"
+                    ),
+                    "citas": [cita_uso] if cita_uso else [],
+                },
+                "intervalo_seguridad": {
+                    "valor": "1 día (marcador de grupo (1))",
+                    "resultado": (
+                        "marcador y leyenda de IS en días presentes en la ficha técnica; "
+                        "no se valida como condición autorizada"
+                        if cita_uso and cita_is
+                        else "no verificado: fuente ausente o hash distinto"
+                    ),
+                    "citas": [c for c in (cita_uso, cita_is) if c],
+                },
+                "periodo_reentrada": {
+                    "valor": "4 horas",
+                    "resultado": (
+                        "figura en la ficha técnica del fabricante"
+                        if cita_reentrada
+                        else "no verificado: fuente ausente o hash distinto"
+                    ),
+                    "citas": [cita_reentrada] if cita_reentrada else [],
+                },
+                "formulacion": {
+                    "valor": None,
+                    "resultado": "no confirmada en la ficha técnica consultada",
+                    "limitacion": (
+                        "El documento declara Jemvelva® active y 60 g de i.a./L, "
+                        "pero no dice explícitamente suspensión concentrada. Esa "
+                        "formulación solo aparece en documentos que se identifican "
+                        "como ilustrativos."
+                    ),
+                    "citas": [cita_concentracion] if cita_concentracion else [],
+                },
+                "elegible_para_aprobacion_corpus": False,
+            }
+        )
+
+    return {
+        "tipo": "busqueda_documental_asistida_por_agente",
+        "fecha_consulta": EXALT_DOCUMENTARY_SEARCH_DATE,
+        "revisor": EXALT_AGENT_REVIEWER,
+        "es_revisor_humano": False,
+        "resultado": "RESPALDO_DE_FABRICANTE_PARCIAL; ETIQUETA_AUTORIZADA_NO_LOCALIZADA",
+        "criterio_aprobacion_modificado": False,
+        "aprobacion_corpus_elegible": False,
+        "fuente_fabricante": {
+            "titulo": "Ficha Técnica Exalt México",
+            "url": EXALT_CORTEVA_TECHNICAL_SHEET_URL,
+            "archivo_local": EXALT_CORTEVA_TECHNICAL_SHEET,
+            "sha256_esperado": EXALT_CORTEVA_TECHNICAL_SHEET_SHA256,
+            "sha256_actual": sha256_actual,
+            "estado_hash": (
+                "coincide_con_archivo_consultado"
+                if fuente_verificada
+                else "fuente_ausente_o_modificada_no_verificada"
+            ),
+            "paginas": len(paginas) if paginas is not None else None,
+            "fecha_impresa_actualizacion": "Marzo 2025",
+            "copyright_impreso": "2026 Corteva",
+            "identidad_y_concentracion": {
+                "resultado": (
+                    "La ficha declara el registro RSCO-INAC-0103X-301-064-006 "
+                    "y Jemvelva® active equivalente a 60 g i.a./L."
+                    if fuente_verificada
+                    else "No verificado: fuente ausente o hash distinto."
+                ),
+                "citas": [c for c in (cita_registro, cita_concentracion) if c],
+            },
+            "limitaciones": [
+                "Es una ficha técnica del fabricante, no una etiqueta autorizada.",
+                "La ficha no identifica explícitamente la formulación como suspensión concentrada.",
+                (
+                    "Su pie de página indica actualización Marzo 2025 aunque el PDF "
+                    "está publicado en la ruta de ficha técnica 2026 y muestra "
+                    "copyright 2026."
+                ),
+            ],
+        },
+        "otras_fuentes_oficiales_consultadas": [
+            {
+                "titulo": "Consulta de Registros Sanitarios de Plaguicidas (COFEPRIS)",
+                "url": COFEPRIS_EXALT_SEARCH_URL,
+                "alcance": (
+                    "La consulta del registro confirma titular, ingrediente activo, "
+                    "nombres comerciales, cultivos listados y vigencia 19/06/2028; "
+                    "no expone la tabla de dosis, plagas por cultivo ni el IS."
+                ),
+                "copia_local": COFEPRIS_EXALT_EVIDENCE,
+                "sha256": EXALT_REVIEWED_SOURCE_HASHES[COFEPRIS_EXALT_EVIDENCE],
+            },
+            {
+                "titulo": "Página Exalt México de Corteva",
+                "url": "https://www.corteva.com/mx/productos-y-soluciones/"
+                "proteccion-de-cultivos/exalt.html",
+                "alcance": (
+                    "Publica la etiqueta web y la ficha técnica del producto; "
+                    "la etiqueta web publicada se declara no real."
+                ),
+            },
+        ],
+        "otras_versiones_documentales": [
+            {
+                "archivo": "DF-label-Exalt.pdf",
+                "sha256": "07a02254e53fdd29d21de753080d9ae50cda7703cd3f3f04daa5d60a827b11ef",
+                "revision_impresa": "18/05/2018",
+                "resultado": (
+                    "También se declara ilustrativa y no etiqueta real; el titular "
+                    "impreso es Dow AgroSciences, por lo que no resuelve la identidad "
+                    "documental actual del registro."
+                ),
+            },
+            {
+                "archivo": EXALT_LABEL,
+                "sha256": EXALT_REVIEWED_SOURCE_HASHES[EXALT_LABEL],
+                "revision_impresa": "12/12/2025",
+                "resultado": (
+                    "Documento ilustrativo; no es una etiqueta real. No sirve como "
+                    "confirmación de autorización."
+                ),
+            },
+        ],
+        "fichas": fichas,
+        "faltantes_para_cerrar_bloqueo": [
+            (
+                "Copia íntegra de la etiqueta autorizada y vigente vinculada al "
+                "registro RSCO-INAC-0103X-301-064-006."
+            ),
+            "Confirmación documental de la formulación exacta del producto del registro.",
+            (
+                "Página o folio de autorización que respalde cada cultivo/plaga, "
+                "dosis, unidad, IS y leyendas de aplicación."
+            ),
+        ],
+        "solicitud_documental_recomendada": {
+            "a": [
+                "CORTEVA MX, S. A. DE C.V., como titular mostrado en las fuentes consultadas.",
+                (
+                    "COFEPRIS, mediante solicitud formal de acceso a la información "
+                    "si la etiqueta vigente no está disponible en la consulta pública."
+                ),
+            ],
+            "pedir": (
+                "Copia íntegra de la etiqueta autorizada y vigente asociada "
+                "específicamente al registro RSCO-INAC-0103X-301-064-006 para Exalt, "
+                "incluyendo formulación, composición/concentración, número de versión "
+                "o fecha de autorización, y páginas que respalden Limonero–Diaphorina "
+                "citri, Mango–Frankliniella occidentalis y Papayo–Spodoptera exigua, "
+                "con sus dosis, unidades, intervalos entre aplicaciones, intervalos "
+                "de seguridad y leyendas que definen sus marcadores."
+            ),
+            "estado": "recomendacion_documental; solicitud no enviada",
+            "url_transparencia": "https://www.plataformadetransparencia.org.mx/",
+        },
+        "nota": (
+            "La ficha del fabricante corrobora las combinaciones y valores transcritos, "
+            "pero no es la etiqueta autorizada ni confirma explícitamente la formulación. "
+            "Se conserva el bloqueo y no se indexa ninguna ficha."
+        ),
+    }
 
 
 def cita_cofepris(
@@ -1214,9 +1505,10 @@ def crear_fichas_exalt_validadas(
         )
         nota_revision = (
             "Revisión documental asistida por agente; no representa firma ni "
-            "aprobación humana. La etiqueta web se declara ilustrativa y no es "
-            "una etiqueta real; la captura COFEPRIS no valida dosis ni plaga. "
-            "Pendiente de cotejo con etiqueta oficial."
+            "aprobación humana. Una ficha técnica de Corteva corrobora cultivos, "
+            "plagas, dosis e IS, pero no es una etiqueta autorizada ni confirma "
+            "explícitamente la formulación. La etiqueta web se declara ilustrativa; "
+            "pendiente de documentación autorizada."
             if evidencia_completa
             else "La revisión asistida no pasó los controles: "
             + " ".join(motivos_evidencia)
@@ -1295,6 +1587,7 @@ def clasificar_y_exportar(
     ruta_pendientes = directorio / "registros_pendientes_revision.json"
     ruta_candidatos = directorio / "chunks_candidatos_revision.json"
     ruta_revision = directorio / EXALT_REVIEW_REPORT
+    ruta_busqueda = directorio / EXALT_DOCUMENTARY_SEARCH_REPORT
     ruta_plantilla_obsoleta = directorio / "revision_manual_exalt.template.json"
     if ruta_plantilla_obsoleta.is_file():
         ruta_plantilla_obsoleta.unlink()
@@ -1316,7 +1609,9 @@ def clasificar_y_exportar(
                 else "EVIDENCIA_INCOMPLETA_O_FUENTE_CAMBIADA"
             )
             nota_estado = (
-                "La fuente de dosis/usos es ilustrativa, no una etiqueta real."
+                "La etiqueta web es ilustrativa. La ficha técnica del fabricante "
+                "corrobora los datos, pero no es una etiqueta autorizada y no confirma "
+                "explícitamente la formulación."
                 if evidencia_completa
                 else "La revisión asistida quedó invalidada: "
                 + " ".join(motivos_evidencia)
@@ -1481,9 +1776,11 @@ def clasificar_y_exportar(
         "aprobacion_corpus_elegible": bool(candidatos_exalt)
         and all(ficha.revision_documental_aprobada for ficha in candidatos_exalt),
         "motivo_bloqueo": (
-            "La etiqueta web se declara ilustrativa y no es una etiqueta real. "
-            "La captura COFEPRIS no corrobora dosis ni combinaciones cultivo/plaga; "
-            "se requiere una etiqueta oficial verificable antes de indexar."
+            "La ficha técnica de Corteva corrobora las combinaciones, dosis y "
+            "marcadores de IS, pero no es una etiqueta autorizada y no confirma "
+            "explícitamente la formulación. La etiqueta web se declara ilustrativa; "
+            "la captura COFEPRIS no contiene dosis ni plagas por cultivo. Se requiere "
+            "documentación autorizada que cierre esos límites antes de indexar."
         ),
         "fichas": [
             {
@@ -1501,6 +1798,16 @@ def clasificar_y_exportar(
             for f in candidatos_exalt
         ],
     }
+    informe_busqueda = construir_informe_busqueda_documental_exalt()
+    with ruta_busqueda.open("w", encoding="utf-8") as archivo:
+        json.dump(informe_busqueda, archivo, ensure_ascii=False, indent=2)
+    informe_revision["corroboracion_documental_fabricante"] = {
+        "archivo": EXALT_DOCUMENTARY_SEARCH_REPORT,
+        "resultado": informe_busqueda["resultado"],
+        "sha256_fuente": informe_busqueda["fuente_fabricante"]["sha256_actual"],
+        "estado_hash_fuente": informe_busqueda["fuente_fabricante"]["estado_hash"],
+        "elegible_para_aprobacion_corpus": False,
+    }
     with ruta_revision.open("w", encoding="utf-8") as f:
         json.dump(informe_revision, f, ensure_ascii=False, indent=2)
 
@@ -1514,6 +1821,7 @@ def clasificar_y_exportar(
         "ruta_pendientes": ruta_pendientes,
         "ruta_candidatos": ruta_candidatos,
         "ruta_revision_documental": ruta_revision,
+        "ruta_busqueda_documental": ruta_busqueda,
     }
 
 
@@ -1546,18 +1854,30 @@ def crear_instrucciones_paquete() -> str:
 4. Ejecute `python src/data_ingest.py` para regenerar las extracciones y los JSON.
 5. `data/processed/chunks_candidatos_revision.json` es una salida de auditoría,
    no debe cargarse al índice RAG. `revision_documental_exalt.json` contiene el
-   cotejo asistido, las citas por campo y los motivos concretos para mantener
-   Exalt pendiente.
+   cotejo asistido y `busqueda_documental_exalt.json` añade las citas de la ficha
+   técnica de Corteva, sus límites y el documento que falta para levantar la
+   cuarentena.
 6. La revisión asistida por agente no equivale a firma, aprobación humana ni
    autorización regulatoria. Exalt solo podrá aprobarse cuando evidencia completa
    y consistente provenga de una etiqueta oficial verificable; si una fuente cambia
    o falta, la revisión ligada a sus hashes deja de ser vigente.
 
-La etiqueta web de Exalt se identifica como ilustrativa y no es una etiqueta real.
-La captura COFEPRIS acredita solo los datos visibles del registro (no dosis ni plaga).
-Las fichas son elaboradas por PhytoRAG-Tropical y no son emitidas ni aprobadas por
-COFEPRIS. No se infiere aprobación OMRI ni compatibilidad de exportación. Este
-paquete no constituye una recomendación agronómica ni demuestra “cero alucinaciones”.
+La ficha técnica de Corteva corrobora las tres combinaciones, dosis e IS bajo el
+registro indicado, pero no es una etiqueta autorizada ni declara explícitamente la
+formulación. La etiqueta web sigue identificada como ilustrativa; la captura
+COFEPRIS no acredita dosis ni plagas por cultivo. Exalt permanece pendiente hasta
+obtener la etiqueta autorizada vigente y confirmar la formulación. Solicítela a
+CORTEVA MX, S. A. DE C.V. o a COFEPRIS; si no está publicada, puede pedirse mediante
+el mecanismo de transparencia aplicable. La solicitud recomendada y su contenido
+están en `busqueda_documental_exalt.json` y no se ha enviado.
+
+SENASICA se conserva como información epidemiológica general y Engeo sigue pendiente
+por su inconsistencia de unidades. El alcance pendiente del Issue #1 también incluye
+los catálogos oficiales OMRI/LPO, que no están disponibles ni verificados en este
+paquete. Las fichas son elaboradas por PhytoRAG-Tropical y no son emitidas ni
+aprobadas por COFEPRIS. No se infiere aprobación orgánica ni compatibilidad de
+exportación. Este paquete no constituye una recomendación agronómica ni demuestra
+“cero alucinaciones”.
 """
 
 
@@ -1623,12 +1943,23 @@ def crear_manifiesto_y_paquete() -> Path:
         + "\n\n## Estado del cotejo documental\n\n"
         + f"- Captura COFEPRIS Exalt: `{hashes[COFEPRIS_EXALT_EVIDENCE]}`.\n"
         + f"- Etiqueta ilustrativa Exalt: `{hashes[EXALT_LABEL]}`.\n"
-        + "- Dosis y plagas: respaldadas únicamente por documento ilustrativo.\n"
+        + "- Ficha técnica de Corteva (respaldo del fabricante, no etiqueta autorizada): "
+        + f"`{EXALT_CORTEVA_TECHNICAL_SHEET_URL}`.\n"
+        + "- SHA-256 de esa ficha: "
+        + f"`{hash_sha256(DATA_RAW / EXALT_CORTEVA_TECHNICAL_SHEET)}`.\n"
+        + "- La ficha respalda las tres combinaciones, dosis e IS, pero no confirma "
+        + "la formulación como suspensión concentrada.\n"
+        + "- No se localizó una etiqueta autorizada vigente; las fichas Exalt siguen "
+        + "pendientes y no indexables.\n"
         + "- Fecha de consulta COFEPRIS: desconocida; la captura solo muestra vigencia.\n"
+        + "- SENASICA se conserva como información epidemiológica general; Engeo "
+        + "sigue pendiente por inconsistencia de unidades.\n"
+        + "- OMRI/LPO sigue pendiente: no se incluyeron catálogos oficiales verificados.\n"
         + "- Aprobación humana: no registrada ni atribuida.\n"
     ]
     manifiesto_lineas.append(
-        "- No se aprueba Exalt para indexación hasta cotejar la etiqueta oficial.\n"
+        "- No se aprueba Exalt para indexación hasta confirmar la etiqueta autorizada "
+        "vigente y la formulación del registro.\n"
     )
     manifiesto = "".join(manifiesto_lineas)
     ruta_manifiesto.write_text(manifiesto, encoding="utf-8")

@@ -5,9 +5,11 @@ import unittest
 from src.data_ingest import (
     COFEPRIS_EXALT_EVIDENCE,
     EXALT_COMBINACIONES,
+    EXALT_CORTEVA_TECHNICAL_SHEET_SHA256,
     EXALT_LABEL,
     EXALT_REVIEWED_SOURCE_HASHES,
     construir_evidencia_campos_exalt,
+    construir_informe_busqueda_documental_exalt,
     construir_texto_exalt,
     puede_aprobar_exalt,
     validar_evidencia_documental_exalt,
@@ -182,6 +184,83 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
         )
         self.assertTrue(completa, motivos)
         self.assertFalse(puede_aprobar_exalt(evidencia, completa))
+
+    def test_ficha_tecnica_corrobora_datos_sin_aprobar_etiqueta_ni_formulacion(
+        self,
+    ) -> None:
+        paginas = {
+            2: (
+                "Registro Sanitario: RSCO-INAC-0103X-301-064-006 "
+                "Insecticida de origen natural novedoso para el control de plagas. "
+                "Ingredientes Activos: Jemvelva® active: Equivalente a 60 g de i.a./L. "
+                "Ingredientes Inertes:"
+            ),
+            4: (
+                "Limonero, Lima, Naranjo Tangerino, Toronjo, Cidro, Mandarino (1) "
+                "Psílido Asíatico de los cítricos (Diaphorina citri) 400-600 "
+                "Realizar una aplicación al follaje cuando se observen la presencia "
+                "de ninfas. Utilizar un volumen de agua adecuado en función del "
+                "tamaño de los árboles tratados para asegurar una buena cobertura "
+                "del follaje. "
+                "Mango (1) Trips de las flores (Frankliniella occidentalis) 400-600 "
+                "Realizar 2 aplicaciones foliares dirigidas a las inflorescencias "
+                "y brotes jóvenes a intervalo de 7 días; volumen sugerido "
+                "600 L de agua/ha. "
+                "Papayo (1) Gusano soldado Spodoptera exigua 200 - 300 "
+                "Realizar una aplicación foliar cuando se detecten las primeras "
+                "larvas vivas; volumen de aplicación sugerido 450-550 L de agua/ha."
+            ),
+            5: (
+                "Periodo de reentrada a las áreas tratadas: 4 horas. "
+                "Intervalo de seguridad: días que deben transcurrir entre la última "
+                "aplicación y la cosecha. (SL) Sin límite."
+            ),
+        }
+        informe = construir_informe_busqueda_documental_exalt(
+            paginas,
+            EXALT_CORTEVA_TECHNICAL_SHEET_SHA256,
+        )
+
+        self.assertEqual(len(informe["fichas"]), 3)
+        self.assertFalse(informe["aprobacion_corpus_elegible"])
+        self.assertFalse(informe["fuente_fabricante"]["limitaciones"] == [])
+        self.assertTrue(
+            all(
+                not ficha["elegible_para_aprobacion_corpus"]
+                for ficha in informe["fichas"]
+            )
+        )
+        for ficha in informe["fichas"]:
+            with self.subTest(cultivo=ficha["cultivo"]):
+                self.assertTrue(ficha["cultivo_y_plaga"]["citas"])
+                self.assertTrue(ficha["dosis"]["citas"])
+                self.assertTrue(ficha["intervalo_seguridad"]["citas"])
+                self.assertEqual(
+                    ficha["formulacion"]["resultado"],
+                    "no confirmada en la ficha técnica consultada",
+                )
+                citas = ficha["dosis"]["citas"]
+                self.assertTrue(
+                    all(
+                        cita["sha256"] == EXALT_CORTEVA_TECHNICAL_SHEET_SHA256
+                        and cita["archivo"]
+                        == "Exalt_ficha_tecnica_Corteva_Mex_2026.pdf"
+                        for cita in citas
+                    )
+                )
+
+    def test_hash_ficha_tecnica_distinto_invalida_sus_citas(self) -> None:
+        informe = construir_informe_busqueda_documental_exalt(
+            {4: "datos que no deben usarse"},
+            "0" * 64,
+        )
+
+        self.assertEqual(
+            informe["fuente_fabricante"]["estado_hash"],
+            "fuente_ausente_o_modificada_no_verificada",
+        )
+        self.assertFalse(informe["aprobacion_corpus_elegible"])
+        self.assertTrue(all(not ficha["dosis"]["citas"] for ficha in informe["fichas"]))
 
     def test_hash_ausente_modificado_o_cita_fabricada_invalida_revision(self) -> None:
         evidencia = construir_evidencia_campos_exalt(
