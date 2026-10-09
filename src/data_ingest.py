@@ -1891,9 +1891,10 @@ infiere aprobación orgánica ni compatibilidad de exportación. Este paquete no
 constituye una recomendación agronómica ni demuestra “cero alucinaciones”.
 
 Los borradores de solicitudes a Corteva, Syngenta, COFEPRIS y SENASICA en
-`investigacion_documental_bloqueos.json` no se han enviado. Antes de contactar
-externamente, el remitente debe revisar el texto y proporcionar/confirmar los datos
-de contacto y el nombre con que desea identificarse.
+`investigacion_documental_bloqueos.json` no se han enviado. El remitente ya fue
+identificado y autorizó sus datos de contacto; debe revisar los textos y presentar
+personalmente las solicitudes en los canales disponibles. No se afirma que hayan
+sido transmitidas.
 """
 
 
@@ -1993,8 +1994,9 @@ def crear_manifiesto_y_paquete() -> Path:
         + "- `investigacion_documental_bloqueos.json` conserva URLs, hashes, "
         + "hallazgos y límites de las fuentes consultadas.\n"
         + "- El mismo informe incluye borradores de solicitudes a Corteva, "
-        + "Syngenta, COFEPRIS y SENASICA; no se han enviado y requieren confirmar "
-        + "la identidad/contacto del remitente.\n"
+        + "Syngenta, COFEPRIS y SENASICA; no se han enviado. El remitente fue "
+        + "identificado, pero debe revisar y transmitir las solicitudes "
+        + "personalmente.\n"
         + "- Aprobación humana: no registrada ni atribuida.\n"
     ]
     manifiesto_lineas.append(
