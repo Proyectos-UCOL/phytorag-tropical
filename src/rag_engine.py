@@ -273,12 +273,16 @@ class MotorPhytoRAG:
             )
 
     def recuperar_documentos(
-        self, query: str, top_k: int = 3, k_rrf: int = 60
+        self,
+        query: str,
+        top_k: int = 3,
+        k_rrf: int = 60,
+        cultivo: str | None = None,
     ) -> list[ResultadoRecuperacion]:
         """
-        Recuperación híbrida usando Reciprocal Rank Fusion (RRF) con filtro de alineación patológica.
-        Combina los rankings de BM25 (léxico) y ChromaDB (semántico), descartando resultados
-        cuya coincidencia con el problema fitosanitario específico sea insuficiente.
+        Recuperación híbrida usando Reciprocal Rank Fusion (RRF) con filtro estricto por cultivo y alineación patológica.
+        Combina los rankings de BM25 (léxico) y ChromaDB (semántico), previniendo recomendaciones fuera de etiqueta (off-label)
+        y descartando candidatos cuya coincidencia con la plaga/enfermedad sea insuficiente.
         """
         if not self.documentos:
             return []
@@ -289,9 +293,6 @@ class MotorPhytoRAG:
             "huerta",
             "arbol",
             "planta",
-            "limon",
-            "mango",
-            "papaya",
             "en",
             "de",
             "la",
@@ -309,6 +310,13 @@ class MotorPhytoRAG:
         tokens_problema_query = [
             t for t in tokens_query if t not in stop_words_agronomicas
         ]
+
+        # Auto-detección de cultivo si no fue provisto explícitamente
+        if not cultivo:
+            for c_candidato in ["limon", "limón", "mango", "papaya"]:
+                if c_candidato in tokens_query or c_candidato in query.lower():
+                    cultivo = c_candidato
+                    break
 
         # 1. Recuperación léxica con BM25
         bm25_scores = (
@@ -350,16 +358,26 @@ class MotorPhytoRAG:
             rrf_scores.items(), key=lambda item: item[1], reverse=True
         )
 
-        # 4. Control de Relevancia Insuficiente (Filtro Anti Falsos Positivos)
-        # Si la consulta contiene términos patológicos específicos (ej. cancro, trips, antracnosis),
-        # se descartan candidatos que solo coinciden por el cultivo pero tratan un problema ajeno.
+        # 4. Filtro Estricto por Cultivo (Anti Off-label) y Control de Relevancia Patológica
         resultados_finales: list[ResultadoRecuperacion] = []
         for doc_id, score in resultados_ordenados:
             doc_info = docs_map.get(doc_id)
             if not doc_info:
                 continue
 
-            # Verificar coincidencia patológica mínima si hay términos de problema en la consulta
+            # A) Filtro Estricto por Cultivo (Inviolabilidad Regulatoria COFEPRIS)
+            if cultivo:
+                cultivo_doc_norm = (
+                    str(doc_info["metadatos"].get("cultivo", ""))
+                    .lower()
+                    .replace("ó", "o")
+                )
+                cultivo_solic_norm = cultivo.lower().replace("ó", "o")
+                if cultivo_solic_norm not in cultivo_doc_norm:
+                    # Descartar: producto registrado para otro frutal
+                    continue
+
+            # B) Filtro de Alineación Patológica
             if tokens_problema_query:
                 texto_problema_doc = self._tokenizar(
                     str(doc_info["metadatos"].get("problema_fitosanitario", ""))
@@ -389,6 +407,7 @@ class MotorPhytoRAG:
         consulta_texto: str,
         contexto: list[ResultadoRecuperacion],
         regimen: str = "convencional",
+        cultivo: str | None = None,
     ) -> dict[str, Any]:
         """
         Genera el dictamen agronómico oficial empleando guardrails deterministas estrictos.
@@ -396,8 +415,25 @@ class MotorPhytoRAG:
         todos los campos regulatorios se sellan de forma determinista desde la ficha oficial
         recuperada y NUNCA provienen de texto libre del LLM.
         """
+        # Auto-detección de cultivo si no fue provisto
+        if not cultivo:
+            for c_candidato in ["limon", "limón", "mango", "papaya"]:
+                if c_candidato in consulta_texto.lower():
+                    cultivo = c_candidato
+                    break
+
         # Caso 1: Sin contexto recuperado
         if not contexto:
+            mensaje_sin_contexto = (
+                f"No se encontró un registro oficial en el Vademécum COFEPRIS / OMRI para el cultivo "
+                f"de '{cultivo}' con los parámetros indicados. Se prohíbe el uso de productos no autorizados "
+                "para este cultivo específico (infracción por uso fuera de etiqueta / off-label)."
+                if cultivo
+                else (
+                    "No se encontró un registro oficial en el Vademécum COFEPRIS / OMRI para los parámetros indicados. "
+                    "Se recomienda acudir con un ingeniero agrónomo certificado antes de aplicar insumos no verificados."
+                )
+            )
             return {
                 "producto_comercial": "No localizado",
                 "ingrediente_activo": "Sin coincidencia oficial",
@@ -406,19 +442,44 @@ class MotorPhytoRAG:
                 "intervalo_seguridad_dias": 0,
                 "aprobacion_organica_omri": False,
                 "compatible_exportacion_usda": False,
-                "recomendacion_agronomica": (
-                    "No se encontró un registro oficial en el Vademécum COFEPRIS / OMRI para los parámetros indicados. "
-                    "Se recomienda acudir con un ingeniero agrónomo certificado antes de aplicar insumos no verificados."
-                ),
-                "fragmento_oficial_citado": "Sin evidencia documental",
+                "recomendacion_agronomica": mensaje_sin_contexto,
+                "fragmento_oficial_citado": "Sin evidencia documental autorizada para este cultivo.",
                 "fuente_documental": "Vademécum Oficial PhytoRAG-Tropical",
             }
 
-        # Caso 2: Validación Determinista de Régimen Orgánico OMRI (Sin fallback silencioso a convencional)
+        # Caso 2: Filtrado Estricto por Cultivo (Blindaje contra vulnerabilidad Off-label)
         candidatos = contexto
+        if cultivo:
+            cultivo_solic_norm = cultivo.lower().replace("ó", "o")
+            candidatos_cultivo = [
+                c
+                for c in contexto
+                if cultivo_solic_norm
+                in str(c.metadatos.get("cultivo", "")).lower().replace("ó", "o")
+            ]
+            if not candidatos_cultivo:
+                return {
+                    "producto_comercial": "No autorizado para este cultivo",
+                    "ingrediente_activo": "Sin registro oficial para el cultivo",
+                    "registro_sanitario_cofepris": "N/A",
+                    "dosis_autorizada": "No aplicable",
+                    "intervalo_seguridad_dias": 0,
+                    "aprobacion_organica_omri": False,
+                    "compatible_exportacion_usda": False,
+                    "recomendacion_agronomica": (
+                        f"RECHAZO REGULATORIO (OFF-LABEL): No existe ningún producto autorizado en el catálogo oficial "
+                        f"para el cultivo de {cultivo} bajo los criterios consultados. En la legislación mexicana (COFEPRIS), "
+                        "está estrictamente prohibido aplicar productos registrados para otros cultivos."
+                    ),
+                    "fragmento_oficial_citado": "Infracción por uso fuera de etiqueta (off-label).",
+                    "fuente_documental": "Catálogo Oficial COFEPRIS / SENASICA",
+                }
+            candidatos = candidatos_cultivo
+
+        # Caso 3: Validación Determinista de Régimen Orgánico OMRI (Sin fallback silencioso a convencional)
         if regimen == "organico_omri":
             candidatos_organicos = [
-                c for c in contexto if bool(c.metadatos.get("aprobado_omri")) is True
+                c for c in candidatos if bool(c.metadatos.get("aprobado_omri")) is True
             ]
             if not candidatos_organicos:
                 return {
@@ -431,20 +492,20 @@ class MotorPhytoRAG:
                     "compatible_exportacion_usda": False,
                     "recomendacion_agronomica": (
                         "RECHAZO REGULATORIO: La consulta solicita tratamiento en régimen orgánico (OMRI/LPO), "
-                        "pero no existe ningún insumo con certificación orgánica autorizado en el catálogo oficial "
-                        "para esta combinación de cultivo y plaga. Está estrictamente prohibido aplicar productos "
-                        "sintéticos convencionales en huertas orgánicas."
+                        f"pero no existe ningún insumo con certificación orgánica autorizado en el catálogo oficial "
+                        f"para {cultivo or 'este cultivo'}. Está estrictamente prohibido aplicar productos sintéticos "
+                        "convencionales en huertas orgánicas."
                     ),
-                    "fragmento_oficial_citado": "Sin registro orgánico OMRI aplicable.",
+                    "fragmento_oficial_citado": "Sin registro orgánico OMRI aplicable para el cultivo.",
                     "fuente_documental": "Vademécum Oficial OMRI / LPO México",
                 }
             candidatos = candidatos_organicos
 
-        # Caso 3: Validación Determinista de Régimen Exportación USDA
+        # Caso 4: Validación Determinista de Régimen Exportación USDA
         elif regimen == "exportacion_usda":
             candidatos_usda = [
                 c
-                for c in contexto
+                for c in candidatos
                 if bool(c.metadatos.get("compatible_exportacion_usda")) is True
             ]
             if not candidatos_usda:
@@ -457,9 +518,9 @@ class MotorPhytoRAG:
                     "aprobacion_organica_omri": False,
                     "compatible_exportacion_usda": False,
                     "recomendacion_agronomica": (
-                        "RECHAZO POR NORMATIVA DE EXPORTACIÓN: Los insumos recuperados no cuentan con tolerancia "
-                        "aprobada de Límites Máximos de Residuos (LMR) por EPA/USDA para exportación hacia EE.UU. "
-                        "Su aplicación provocaría el rechazo del embarque en aduanas."
+                        f"RECHAZO POR NORMATIVA DE EXPORTACIÓN: Los insumos recuperados para {cultivo or 'este cultivo'} "
+                        "no cuentan con tolerancia aprobada de Límites Máximos de Residuos (LMR) por EPA/USDA para exportación "
+                        "hacia EE.UU. Su aplicación provocaría el rechazo del embarque en aduanas."
                     ),
                     "fragmento_oficial_citado": "Incompatible con tolerancias de exportación USDA/EPA.",
                     "fuente_documental": "Límites Máximos de Residuos USDA / EPA",
@@ -510,7 +571,7 @@ class MotorPhytoRAG:
                 "RESPONDE ÚNICAMENTE EL PÁRRAFO DE LA RECOMENDACIÓN AGRONÓMICA:"
             )
 
-            modelo_gemini = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            modelo_gemini = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
             respuesta = client.models.generate_content(
                 model=modelo_gemini,
                 contents=prompt_sistema,

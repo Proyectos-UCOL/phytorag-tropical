@@ -92,14 +92,17 @@ def consultar_fitosanidad(consulta: ConsultaFitosanitaria):
         if consulta.etapa_fenologica:
             query += f" Etapa: {consulta.etapa_fenologica}."
 
-        # 1. Recuperar fragmentos normativos oficiales
-        contexto_recuperado = motor_rag.recuperar_documentos(query=query, top_k=3)
+        # 1. Recuperar fragmentos normativos oficiales con filtro estricto por cultivo
+        contexto_recuperado = motor_rag.recuperar_documentos(
+            query=query, top_k=3, cultivo=consulta.cultivo
+        )
 
-        # 2. Generar dictamen fitosanitario con guardrails deterministas
+        # 2. Generar dictamen fitosanitario con guardrails deterministas y anti off-label
         resultado = motor_rag.generar_recomendacion(
             consulta_texto=query,
             contexto=contexto_recuperado,
             regimen=consulta.regimen,
+            cultivo=consulta.cultivo,
         )
 
         return RecomendacionTratamiento(**resultado)
