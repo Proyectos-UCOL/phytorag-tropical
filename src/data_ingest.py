@@ -1858,7 +1858,8 @@ def crear_instrucciones_paquete() -> str:
    cotejo asistido y `busqueda_documental_exalt.json` añade las citas de la ficha
    técnica de Corteva, sus límites y el documento que falta para levantar la
    cuarentena. `investigacion_documental_bloqueos.json` registra las fuentes OMRI,
-   LPO, Exalt y Engeo consultadas para el Issue #1.
+   LPO, Exalt y Engeo consultadas para el Issue #1 y contiene borradores de
+   solicitudes documentales que no se han enviado.
 6. La revisión asistida por agente no equivale a firma, aprobación humana ni
    autorización regulatoria. Exalt solo podrá aprobarse cuando evidencia completa
    y consistente provenga de una etiqueta oficial verificable; si una fuente cambia
@@ -1888,6 +1889,11 @@ el alcance normativo. El estado, hashes y límites de estas consultas están en
 elaboradas por PhytoRAG-Tropical y no son emitidas ni aprobadas por COFEPRIS. No se
 infiere aprobación orgánica ni compatibilidad de exportación. Este paquete no
 constituye una recomendación agronómica ni demuestra “cero alucinaciones”.
+
+Los borradores de solicitudes a Corteva, Syngenta, COFEPRIS y SENASICA en
+`investigacion_documental_bloqueos.json` no se han enviado. Antes de contactar
+externamente, el remitente debe revisar el texto y proporcionar/confirmar los datos
+de contacto y el nombre con que desea identificarse.
 """
 
 
@@ -1986,6 +1992,9 @@ def crear_manifiesto_y_paquete() -> Path:
         + "versión digitalizada; Exalt y Engeo permanecen sin aprobación orgánica.\n"
         + "- `investigacion_documental_bloqueos.json` conserva URLs, hashes, "
         + "hallazgos y límites de las fuentes consultadas.\n"
+        + "- El mismo informe incluye borradores de solicitudes a Corteva, "
+        + "Syngenta, COFEPRIS y SENASICA; no se han enviado y requieren confirmar "
+        + "la identidad/contacto del remitente.\n"
         + "- Aprobación humana: no registrada ni atribuida.\n"
     ]
     manifiesto_lineas.append(
