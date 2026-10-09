@@ -8,10 +8,15 @@ from src.data_ingest import (
     EXALT_CORTEVA_TECHNICAL_SHEET_SHA256,
     EXALT_LABEL,
     EXALT_REVIEWED_SOURCE_HASHES,
+    DosisEspecificacion,
+    EvidenciaCampo,
+    FichaFitosanitaria,
+    TrazabilidadFuente,
     construir_evidencia_campos_exalt,
     construir_informe_busqueda_documental_exalt,
     construir_texto_exalt,
     puede_aprobar_exalt,
+    serializar_metadatos_ficha,
     validar_evidencia_documental_exalt,
 )
 
@@ -92,6 +97,44 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
             pagina["pagina"]: pagina["texto"] for pagina in self.documento["paginas"]
         }
         self.hashes = dict(EXALT_REVIEWED_SOURCE_HASHES)
+
+    def test_metadatos_exportados_incluyen_dosis_y_campos_canonicos(self) -> None:
+        ficha = FichaFitosanitaria(
+            id_registro="FICH-TEST-001",
+            cultivo="Limonero",
+            problema_fitosanitario="Diaphorina citri",
+            ingrediente_activo="spinetoram",
+            registro_cofepris="RSCO-TEST",
+            dosis=DosisEspecificacion(
+                minima=400,
+                maxima=600,
+                unidad="mL/ha",
+                texto_etiqueta="400 - 600",
+            ),
+            aprobado_omri=None,
+            trazabilidad=TrazabilidadFuente(
+                documento_o_url="etiqueta.pdf",
+                ubicacion_fuente="Página 4",
+                sha256="a" * 64,
+            ),
+            evidencia_documental={
+                "marcador_grupo_cultivos": EvidenciaCampo(
+                    valor="(1)",
+                    estado="respaldado_solo_en_documento_ilustrativo",
+                )
+            },
+        )
+
+        metadatos = serializar_metadatos_ficha(ficha)
+
+        self.assertEqual(metadatos["dosis"]["texto_etiqueta"], "400 - 600")
+        self.assertEqual(metadatos["dosis"]["unidad"], "mL/ha")
+        self.assertEqual(metadatos["cultivo"], "Limonero")
+        self.assertEqual(metadatos["problema_fitosanitario"], "Diaphorina citri")
+        self.assertEqual(metadatos["ingrediente_activo"], "spinetoram")
+        self.assertEqual(metadatos["registro_cofepris"], "RSCO-TEST")
+        self.assertIsNone(metadatos["is_dias"])
+        self.assertIsNone(metadatos["aprobado_omri"])
 
     def test_chunks_separan_combinaciones_y_conservan_restricciones(self) -> None:
         chunks = {

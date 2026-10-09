@@ -733,6 +733,38 @@ def serializar_evidencia_campos(
     return {nombre: campo.model_dump() for nombre, campo in evidencia.items()}
 
 
+def serializar_metadatos_ficha(ficha: FichaFitosanitaria) -> dict[str, Any]:
+    """Serializa los campos canónicos de una ficha para sus chunks JSON."""
+    dosis = ficha.dosis.model_dump() if ficha.dosis else None
+    marcador_grupo = ficha.evidencia_documental.get("marcador_grupo_cultivos")
+    return {
+        "id_registro": ficha.id_registro,
+        "cultivo": ficha.cultivo,
+        "problema_fitosanitario": ficha.problema_fitosanitario,
+        "ingrediente_activo": ficha.ingrediente_activo,
+        "registro_cofepris": ficha.registro_cofepris,
+        "dosis": dosis,
+        "dosis_texto": ficha.dosis.texto_etiqueta if ficha.dosis else None,
+        "dosis_minima": ficha.dosis.minima if ficha.dosis else None,
+        "dosis_maxima": ficha.dosis.maxima if ficha.dosis else None,
+        "dosis_unidad": ficha.dosis.unidad if ficha.dosis else None,
+        "marcador_grupo_cultivos": marcador_grupo.valor if marcador_grupo else None,
+        "is_dias": ficha.is_dias,
+        "periodo_reingreso_horas": ficha.periodo_reingreso_horas,
+        "aprobado_omri": ficha.aprobado_omri,
+        "revision_documental_aprobada": ficha.revision_documental_aprobada,
+        "estado_revision_documental": ficha.estado_revision_documental,
+        "evidencia_documental": serializar_evidencia_campos(ficha.evidencia_documental),
+        "documento_fuente": ficha.trazabilidad.documento_o_url,
+        "sha256_fuente": ficha.trazabilidad.sha256,
+        "ubicacion_fuente": ficha.trazabilidad.ubicacion_fuente,
+        "fecha_consulta": ficha.trazabilidad.fecha_consulta,
+        "fuentes_adicionales": [
+            fuente.model_dump() for fuente in ficha.fuentes_adicionales
+        ],
+    }
+
+
 def construir_evidencia_campos_exalt(
     documento: dict[str, Any],
     combinacion: dict[str, Any],
@@ -1646,35 +1678,7 @@ def clasificar_y_exportar(
         ChunkCorpus(
             id_documento=f.id_registro,
             texto=f.texto_fragmento or "",
-            metadatos={
-                "id_registro": f.id_registro,
-                "cultivo": f.cultivo,
-                "problema_fitosanitario": f.problema_fitosanitario,
-                "ingrediente_activo": f.ingrediente_activo,
-                "registro_cofepris": f.registro_cofepris,
-                "dosis_texto": f.dosis.texto_etiqueta if f.dosis else None,
-                "dosis_minima": f.dosis.minima if f.dosis else None,
-                "dosis_maxima": f.dosis.maxima if f.dosis else None,
-                "dosis_unidad": f.dosis.unidad if f.dosis else None,
-                "marcador_grupo_cultivos": f.evidencia_documental.get(
-                    "marcador_grupo_cultivos", {}
-                ).valor,
-                "is_dias": f.is_dias,
-                "periodo_reingreso_horas": f.periodo_reingreso_horas,
-                "aprobado_omri": f.aprobado_omri,
-                "revision_documental_aprobada": f.revision_documental_aprobada,
-                "estado_revision_documental": f.estado_revision_documental,
-                "evidencia_documental": serializar_evidencia_campos(
-                    f.evidencia_documental
-                ),
-                "documento_fuente": f.trazabilidad.documento_o_url,
-                "sha256_fuente": f.trazabilidad.sha256,
-                "ubicacion_fuente": f.trazabilidad.ubicacion_fuente,
-                "fecha_consulta": f.trazabilidad.fecha_consulta,
-                "fuentes_adicionales": [
-                    fuente.model_dump() for fuente in f.fuentes_adicionales
-                ],
-            },
+            metadatos=serializar_metadatos_ficha(f),
         ).model_dump()
         for f in validadas
     ]
@@ -1686,34 +1690,7 @@ def clasificar_y_exportar(
         ChunkCorpus(
             id_documento=f.id_registro,
             texto=f.texto_fragmento or "",
-            metadatos={
-                "id_registro": f.id_registro,
-                "cultivo": f.cultivo,
-                "problema_fitosanitario": f.problema_fitosanitario,
-                "ingrediente_activo": f.ingrediente_activo,
-                "registro_cofepris": f.registro_cofepris,
-                "dosis_texto": f.dosis.texto_etiqueta if f.dosis else None,
-                "dosis_minima": f.dosis.minima if f.dosis else None,
-                "dosis_maxima": f.dosis.maxima if f.dosis else None,
-                "dosis_unidad": f.dosis.unidad if f.dosis else None,
-                "marcador_grupo_cultivos": f.evidencia_documental.get(
-                    "marcador_grupo_cultivos", {}
-                ).valor,
-                "is_dias": f.is_dias,
-                "periodo_reingreso_horas": f.periodo_reingreso_horas,
-                "aprobado_omri": f.aprobado_omri,
-                "revision_documental_aprobada": f.revision_documental_aprobada,
-                "estado_revision_documental": f.estado_revision_documental,
-                "evidencia_documental": serializar_evidencia_campos(
-                    f.evidencia_documental
-                ),
-                "documento_fuente": f.trazabilidad.documento_o_url,
-                "sha256_fuente": f.trazabilidad.sha256,
-                "ubicacion_fuente": f.trazabilidad.ubicacion_fuente,
-                "fuentes_adicionales": [
-                    fuente.model_dump() for fuente in f.fuentes_adicionales
-                ],
-            },
+            metadatos=serializar_metadatos_ficha(f),
         ).model_dump()
         for f in candidatos_exalt
     ]
