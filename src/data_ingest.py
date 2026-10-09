@@ -10,35 +10,41 @@ import json
 import platform
 import re
 import zipfile
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pypdf
 import requests
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
-REVISION_MANUAL_EXALT = DATA_RAW / "revision_manual_exalt.json"
-
 EXALT_LABEL = "Exalt_etiqueta_web_rev_2025.pdf"
 COFEPRIS_EXALT_EVIDENCE = "Consulta_COFEPRIS_Exalt.png"
+EXALT_AGENT_REVIEWER = "GitHub Copilot coding agent"
+EXALT_AGENT_REVIEWED_AT = "2026-10-08T23:44:14-06:00"
+EXALT_REVIEW_REPORT = "revision_documental_exalt.json"
+EXALT_REVIEWED_SOURCE_HASHES = {
+    EXALT_LABEL: "917258e03aaae9a0164aee6b77bf9606cf2f36a28eaa33ff2be3ccaad4b6c11d",
+    COFEPRIS_EXALT_EVIDENCE: "8cd075a2dbe5028c92928269a224a85153cbf08b006a1facaa0c54df427dd847",
+}
 
 EXALT_COMBINACIONES = (
     {
         "id": "FICH-EXALT-LIMONERO-DIAPHORINA-001",
         "cultivo": "Limonero",
         "problema_fitosanitario": "Diaphorina citri",
-        "pagina": 3,
+        "pagina": 4,
         "inicio": "Limonero, Lima, Naranjo",
         "fin": "Minador de la hoja",
+        "fin_evidencia": "buena cobertura del follaje.",
         "dosis_minima": 400.0,
         "dosis_maxima": 600.0,
         "dosis_texto": "400 - 600",
-        "cultivo_cientifico": "Citrus aurantiifolia / grupo cítricos",
+        "marcador_grupo_cultivos": "(1)",
     },
     {
         "id": "FICH-EXALT-MANGO-TRIPS-001",
@@ -47,10 +53,11 @@ EXALT_COMBINACIONES = (
         "pagina": 5,
         "inicio": "Mango \n(1)",
         "fin": "Papayo \n(1)",
+        "fin_evidencia": "600 L de agua/ha.",
         "dosis_minima": 400.0,
         "dosis_maxima": 600.0,
         "dosis_texto": "400-600",
-        "cultivo_cientifico": "Mangifera indica",
+        "marcador_grupo_cultivos": "(1)",
     },
     {
         "id": "FICH-EXALT-PAPAYO-SPODOPTERA-001",
@@ -59,23 +66,36 @@ EXALT_COMBINACIONES = (
         "pagina": 5,
         "inicio": "Papayo \n(1)",
         "fin": "450-550 L de agua/ha.",
+        "fin_evidencia": "450-550 L de agua/ha.",
         "dosis_minima": 200.0,
         "dosis_maxima": 300.0,
         "dosis_texto": "200 - 300",
-        "cultivo_cientifico": "Carica papaya",
+        "marcador_grupo_cultivos": "(1)",
     },
 )
 
-CAMPOS_REVISION_MANUAL_EXALT = {
+EXALT_EVIDENCE_FIELDS = {
+    "producto_comercial",
+    "ingrediente_activo",
     "registro_cofepris",
     "titular",
-    "vigencia",
-    "cultivos",
+    "cultivo",
     "problema_fitosanitario",
-    "dosis_y_unidad",
-    "intervalo_seguridad",
-    "reentrada",
-    "restricciones",
+    "dosis",
+    "unidad_dosis",
+    "marcador_grupo_cultivos",
+    "is_dias",
+    "periodo_reingreso_horas",
+    "vigencia_registro",
+    "fecha_consulta_cofepris",
+    "restricciones_proteccion_personal",
+    "restricciones_abejas_floracion",
+    "restricciones_mezclas",
+    "aprobado_omri",
+    "compatibilidad_exportacion",
+    "nombre_cientifico_cultivo",
+    "limitacion_documental",
+    "etiqueta_oficial_verificada",
 }
 
 URL_OFICIAL_SENASICA_DIAPHORINA = (
@@ -128,37 +148,18 @@ class TrazabilidadFuente(BaseModel):
     )
 
 
-class RevisionManualExalt(BaseModel):
-    """Atestación humana de revisión ligada a las versiones exactas de las fuentes."""
-
-    revisor: str = Field(min_length=1)
-    fecha_revision: date
-    aprobada: bool = Field(strict=True)
-    hashes_fuentes: dict[str, str]
-    combinaciones_verificadas: set[str]
-    campos_verificados: set[str]
-
-    @field_validator("revisor")
-    @classmethod
-    def validar_revisor(cls, valor: str) -> str:
-        valor = valor.strip()
-        if not valor:
-            raise ValueError("El nombre del revisor no puede estar vacío.")
-        return valor
-
-
 class DosisEspecificacion(BaseModel):
     """Especificación numérica de dosis con validación de positividad y rango."""
 
     minima: float | None = Field(
         default=None,
         gt=0,
-        description="Dosis mínima autorizada. Debe ser > 0 cuando existe.",
+        description="Dosis mínima transcrita. Debe ser > 0 cuando existe.",
     )
     maxima: float = Field(
         ...,
         gt=0,
-        description="Dosis máxima autorizada. Obligatoria y mayor a 0.",
+        description="Dosis máxima transcrita. Obligatoria y mayor a 0.",
     )
     unidad: str = Field(
         ...,
@@ -195,6 +196,36 @@ class DosisEspecificacion(BaseModel):
                 f"La dosis mínima ({self.minima}) no puede ser mayor que la máxima ({self.maxima})"
             )
         return self
+
+
+class CitaEvidencia(BaseModel):
+    """Referencia verificable a un fragmento PDF o a una inspección visual."""
+
+    archivo: str
+    sha256: str | None
+    ubicacion: str
+    fragmento: str
+    metodo_verificacion: Literal[
+        "extraccion_textual_pdf",
+        "inspeccion_visual_asistida_por_agente",
+    ]
+    alcance: str
+    no_verificado_por_ocr: bool = False
+
+
+class EvidenciaCampo(BaseModel):
+    """Valor de un campo, su estado epistemológico y las citas que lo respaldan."""
+
+    valor: str | int | float | bool | None
+    estado: Literal[
+        "respaldado_en_fuente",
+        "respaldado_solo_en_documento_ilustrativo",
+        "interpretado_desde_marcador_ilustrativo",
+        "desconocido",
+        "limitacion_critica",
+    ]
+    citas: list[CitaEvidencia] = Field(default_factory=list)
+    motivo: str | None = None
 
 
 class FichaFitosanitaria(BaseModel):
@@ -253,6 +284,16 @@ class FichaFitosanitaria(BaseModel):
     observaciones: str | None = Field(
         default=None,
         description="Notas de manejo, restricciones o justificación de campos faltantes",
+    )
+    evidencia_documental: dict[str, EvidenciaCampo] = Field(
+        default_factory=dict,
+        description=(
+            "Evidencia por campo con fuente, ubicación, fragmento literal y hash."
+        ),
+    )
+    estado_revision_documental: str = Field(
+        default="PENDIENTE_REVISION",
+        description="Estado y limitaciones de la revisión documental.",
     )
 
     revision_documental_aprobada: bool = Field(
@@ -323,61 +364,434 @@ def hash_sha256(ruta: Path) -> str | None:
     return digest.hexdigest()
 
 
-def validar_revision_manual_exalt(
-    revision: dict[str, Any] | None,
+def normalizar_fragmento_evidencia(texto: str) -> str:
+    """Normaliza espacios para cotejar fragmentos PDF sin alterar sus palabras."""
+    return re.sub(r"\s+", " ", texto).strip().casefold()
+
+
+def cita_pdf(
+    paginas: dict[int, str],
+    numero_pagina: int,
+    inicio: str,
+    fin: str,
+    sha256: str | None,
+    alcance: str,
+) -> CitaEvidencia:
+    """Extrae y valida una cita literal de una página concreta del PDF."""
+    texto = paginas.get(numero_pagina, "")
+    indice_inicio = texto.find(inicio)
+    if indice_inicio < 0:
+        raise ValueError(
+            f"No se encontró evidencia PDF en página {numero_pagina}: {inicio!r}"
+        )
+    indice_fin = texto.find(fin, indice_inicio + len(inicio))
+    if indice_fin < 0:
+        raise ValueError(
+            f"No se encontró el final de evidencia PDF en página {numero_pagina}: "
+            f"{fin!r}"
+        )
+    fragmento = texto[indice_inicio : indice_fin + len(fin)].strip()
+    return CitaEvidencia(
+        archivo=EXALT_LABEL,
+        sha256=sha256,
+        ubicacion=f"Página {numero_pagina}",
+        fragmento=fragmento,
+        metodo_verificacion="extraccion_textual_pdf",
+        alcance=alcance,
+    )
+
+
+def cita_cofepris(
+    fragmento: str,
+    sha256: str | None,
+    alcance: str,
+) -> CitaEvidencia:
+    """Registra una transcripción visual de la captura, no una lectura OCR."""
+    return CitaEvidencia(
+        archivo=COFEPRIS_EXALT_EVIDENCE,
+        sha256=sha256,
+        ubicacion="Captura: detalle del registro",
+        fragmento=fragmento,
+        metodo_verificacion="inspeccion_visual_asistida_por_agente",
+        alcance=alcance,
+        no_verificado_por_ocr=True,
+    )
+
+
+def campo_evidencia(
+    valor: Any,
+    citas: list[CitaEvidencia] | None = None,
+    *,
+    estado: str = "respaldado_en_fuente",
+    motivo: str | None = None,
+) -> EvidenciaCampo:
+    """Representa respaldo o desconocimiento explícito de un campo."""
+    return EvidenciaCampo(
+        valor=valor,
+        estado=estado,
+        citas=citas or [],
+        motivo=motivo,
+    )
+
+
+def serializar_evidencia_campos(
+    evidencia: dict[str, EvidenciaCampo],
+) -> dict[str, dict[str, Any]]:
+    """Convierte evidencia Pydantic a tipos JSON serializables."""
+    return {nombre: campo.model_dump() for nombre, campo in evidencia.items()}
+
+
+def construir_evidencia_campos_exalt(
+    documento: dict[str, Any],
+    combinacion: dict[str, Any],
     hashes_fuentes: dict[str, str | None],
+) -> dict[str, EvidenciaCampo]:
+    """Crea trazabilidad de campo a fuente, página, fragmento y hash."""
+    paginas = {pagina["pagina"]: pagina["texto"] for pagina in documento["paginas"]}
+    fila = cita_pdf(
+        paginas,
+        combinacion["pagina"],
+        combinacion["inicio"],
+        combinacion["fin_evidencia"],
+        hashes_fuentes[EXALT_LABEL],
+        "Respaldó la combinación cultivo/plaga y su dosis en una etiqueta "
+        "que se declara ilustrativa, no una etiqueta real.",
+    )
+    identidad = cita_pdf(
+        paginas,
+        1,
+        "REGISTRO SANITARIO No.:",
+        "México, México",
+        hashes_fuentes[EXALT_LABEL],
+        "Identidad declarada en el documento ilustrativo.",
+    )
+    cultivo_captura = {
+        "Limonero": "LIMONERO, LIMA, NARANJO, TANGERINO, TORONJO, CIDRO, MANDARINO",
+        "Mango": "MANGO, PAPAYO",
+        "Papayo": "MANGO, PAPAYO",
+    }[combinacion["cultivo"]]
+    ingrediente_pdf = cita_pdf(
+        paginas,
+        1,
+        "Spinetoram: (mezcla de Spinosyn J y Spinosyn L)",
+        "5.87",
+        hashes_fuentes[EXALT_LABEL],
+        "Composición de la etiqueta ilustrativa.",
+    )
+    caveat = cita_pdf(
+        paginas,
+        1,
+        "ESTE DOCUMENTO TIENE FINES ILUSTRATIVOS ÚNICAMENTE.",
+        "REV. 12/12/2025",
+        hashes_fuentes[EXALT_LABEL],
+        "El propio PDF declara que no es una etiqueta real y muestra su revisión impresa.",
+    )
+    reentrada_is = cita_pdf(
+        paginas,
+        3,
+        "Periodo de reentrada a las áreas tratadas:",
+        "(SL) Sin Límite.",
+        hashes_fuentes[EXALT_LABEL],
+        "Valor de reentrada y leyenda de que IS se expresa en días.",
+    )
+    ppe = cita_pdf(
+        paginas,
+        2,
+        "Durante el manejo, preparación de la mezcla",
+        "Después de haber usado su ropa protectora contaminada",
+        hashes_fuentes[EXALT_LABEL],
+        "Instrucciones generales de protección personal.",
+    )
+    polinizadores = cita_pdf(
+        paginas,
+        2,
+        "ESTE PRODUCTO ES ALTAMENTE TÓXICO PARA ABEJAS.",
+        "ABEJAS SE ENCUENTRAN LIBANDO.",
+        hashes_fuentes[EXALT_LABEL],
+        "Restricción expresa durante floración y actividad de abejas.",
+    )
+    mezclas = cita_pdf(
+        paginas,
+        3,
+        "INCOMPATIBILIDAD.",
+        "prueba de compatibilidad y fitotoxicidad previa a la aplicación.",
+        hashes_fuentes[EXALT_LABEL],
+        "Advertencia general sobre mezclas y prueba previa.",
+    )
+
+    evidencia: dict[str, EvidenciaCampo] = {
+        "producto_comercial": campo_evidencia(
+            "Exalt",
+            [
+                cita_cofepris(
+                    "Nombre comercial: EXALT / PALGUS / GF-1629 / TADEK",
+                    hashes_fuentes[COFEPRIS_EXALT_EVIDENCE],
+                    "Confirma que el detalle capturado incluye Exalt entre varios nombres comerciales.",
+                )
+            ],
+        ),
+        "ingrediente_activo": campo_evidencia(
+            "spinetoram (mezcla de Spinosyn J y Spinosyn L)",
+            [
+                ingrediente_pdf,
+                cita_cofepris(
+                    "Ingrediente activo: SPINETORAM: (Mezcla de Spinosyn J y Spinosyn L)",
+                    hashes_fuentes[COFEPRIS_EXALT_EVIDENCE],
+                    "Confirma visualmente el ingrediente, no la dosis ni el uso por plaga.",
+                ),
+            ],
+        ),
+        "registro_cofepris": campo_evidencia(
+            "RSCO-INAC-0103X-301-064-006",
+            [
+                identidad,
+                cita_cofepris(
+                    "Registro: RSCO-INAC-0103X-301-064-006",
+                    hashes_fuentes[COFEPRIS_EXALT_EVIDENCE],
+                    "Coincide visualmente el número de registro de la etiqueta ilustrativa.",
+                ),
+            ],
+        ),
+        "titular": campo_evidencia(
+            "CORTEVA MX, S. A. DE C.V.",
+            [
+                identidad,
+                cita_cofepris(
+                    "Empresa: CORTEVA MX, S.A. DE C.V.",
+                    hashes_fuentes[COFEPRIS_EXALT_EVIDENCE],
+                    "El espaciado de puntuación difiere, pero la razón social coincide.",
+                ),
+            ],
+        ),
+        "cultivo": campo_evidencia(
+            combinacion["cultivo"],
+            [
+                fila,
+                cita_cofepris(
+                    cultivo_captura,
+                    hashes_fuentes[COFEPRIS_EXALT_EVIDENCE],
+                    "La captura incluye el cultivo en el listado general de usos; no identifica la plaga.",
+                ),
+            ],
+        ),
+        "problema_fitosanitario": campo_evidencia(
+            combinacion["problema_fitosanitario"],
+            [fila],
+        ),
+        "dosis": campo_evidencia(
+            combinacion["dosis_texto"],
+            [fila],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo=(
+                "La captura COFEPRIS no muestra ni valida dosis; el único respaldo "
+                "es la etiqueta ilustrativa de Corteva."
+            ),
+        ),
+        "unidad_dosis": campo_evidencia(
+            "mL/ha",
+            [
+                cita_pdf(
+                    paginas,
+                    combinacion["pagina"],
+                    "CULTIVO PLAGA DOSIS",
+                    "RECOMENDACIONES",
+                    hashes_fuentes[EXALT_LABEL],
+                    "Encabezado de dosis de la tabla ilustrativa.",
+                ),
+                fila,
+            ],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo="La unidad no aparece en la captura COFEPRIS.",
+        ),
+        "marcador_grupo_cultivos": campo_evidencia(
+            combinacion["marcador_grupo_cultivos"],
+            [fila],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo="El marcador procede de la fila/grupo del documento ilustrativo.",
+        ),
+        "is_dias": campo_evidencia(
+            1,
+            [
+                fila,
+                cita_pdf(
+                    paginas,
+                    3,
+                    "Maíz  (1 día grano)",
+                    "(3 días forraje)",
+                    hashes_fuentes[EXALT_LABEL],
+                    "Ejemplo de la misma tabla que muestra códigos de grupo expresados en días.",
+                ),
+                cita_pdf(
+                    paginas,
+                    3,
+                    "(IS) Intervalo de Seguridad:",
+                    "(SL) Sin Límite.",
+                    hashes_fuentes[EXALT_LABEL],
+                    "Define IS en días; la interpretación de (1) como un día se apoya "
+                    "en la notación de la tabla, no en la captura COFEPRIS.",
+                ),
+            ],
+            estado="interpretado_desde_marcador_ilustrativo",
+            motivo="Requiere cotejo con una etiqueta oficial, no ilustrativa.",
+        ),
+        "periodo_reingreso_horas": campo_evidencia(
+            4,
+            [reentrada_is],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo="La captura COFEPRIS no muestra periodo de reentrada.",
+        ),
+        "vigencia_registro": campo_evidencia(
+            "19/06/2028",
+            [
+                cita_cofepris(
+                    "Vigencia: 19/06/2028",
+                    hashes_fuentes[COFEPRIS_EXALT_EVIDENCE],
+                    "Fecha de vigencia visible en la captura; no es la fecha de consulta.",
+                )
+            ],
+        ),
+        "fecha_consulta_cofepris": campo_evidencia(
+            None,
+            estado="desconocido",
+            motivo="La captura no muestra la fecha en que se realizó la consulta.",
+        ),
+        "restricciones_proteccion_personal": campo_evidencia(
+            "Aplicar el equipo de protección indicado en la etiqueta.",
+            [ppe],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo="El detalle COFEPRIS no muestra instrucciones de protección personal.",
+        ),
+        "restricciones_abejas_floracion": campo_evidencia(
+            "No aplicar cuando el cultivo o malezas estén en flor ni cuando las abejas liben.",
+            [polinizadores],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo="El detalle COFEPRIS no muestra esta restricción.",
+        ),
+        "restricciones_mezclas": campo_evidencia(
+            "No se recomienda mezclar Exalt en mezclas de tanque; si se mezcla, realizar prueba previa.",
+            [mezclas],
+            estado="respaldado_solo_en_documento_ilustrativo",
+            motivo="El detalle COFEPRIS no muestra restricciones de mezclas.",
+        ),
+        "aprobado_omri": campo_evidencia(
+            None,
+            estado="desconocido",
+            motivo="Ni la etiqueta ilustrativa ni la captura presentan evidencia OMRI.",
+        ),
+        "compatibilidad_exportacion": campo_evidencia(
+            None,
+            estado="desconocido",
+            motivo="Las fuentes revisadas no documentan compatibilidad de exportación.",
+        ),
+        "nombre_cientifico_cultivo": campo_evidencia(
+            None,
+            estado="desconocido",
+            motivo=(
+                "Las dos fuentes cotejadas solo sustentan el nombre común del cultivo; "
+                "no se atribuye un nombre científico."
+            ),
+        ),
+        "limitacion_documental": campo_evidencia(
+            "Etiqueta web ilustrativa; no es una etiqueta real.",
+            [caveat],
+            estado="limitacion_critica",
+            motivo=(
+                "La fuente no acredita que los usos y dosis sean los autorizados "
+                "en una etiqueta real vigente."
+            ),
+        ),
+        "etiqueta_oficial_verificada": campo_evidencia(
+            False,
+            [caveat],
+            estado="limitacion_critica",
+            motivo=(
+                "El PDF revisado se identifica como ilustrativo; no es una etiqueta "
+                "oficial verificable."
+            ),
+        ),
+    }
+    return evidencia
+
+
+def validar_evidencia_documental_exalt(
+    evidencia: dict[str, EvidenciaCampo],
+    paginas: dict[int, str] | None,
+    hashes_actuales: dict[str, str | None],
 ) -> tuple[bool, list[str]]:
-    """Acepta la revisión solo si la atestación cubre los archivos actuales y los tres usos."""
+    """Comprueba cobertura, citas literales, hashes y límites de autoridad."""
     motivos: list[str] = []
-    faltantes = [nombre for nombre, digest in hashes_fuentes.items() if digest is None]
+    for archivo, hash_revisado in EXALT_REVIEWED_SOURCE_HASHES.items():
+        if hashes_actuales.get(archivo) != hash_revisado:
+            motivos.append(
+                f"La fuente {archivo} falta o cambió desde la revisión asistida."
+            )
+    faltantes = EXALT_EVIDENCE_FIELDS - evidencia.keys()
     if faltantes:
-        motivos.append("Faltan fuentes necesarias: " + ", ".join(sorted(faltantes)))
-    if revision is None:
         motivos.append(
-            f"No existe el registro de revisión manual {REVISION_MANUAL_EXALT.name}."
+            "Faltan campos con evidencia o motivo explícito: "
+            + ", ".join(sorted(faltantes))
         )
-        return False, motivos
-
-    try:
-        atestacion = RevisionManualExalt.model_validate(revision)
-    except ValidationError as error:
-        motivos.append(f"El registro de revisión manual no es válido: {error}")
-        return False, motivos
-
-    if not atestacion.aprobada:
-        motivos.append("El registro de revisión manual no marca aprobación.")
-    if atestacion.hashes_fuentes != {
-        nombre: digest
-        for nombre, digest in hashes_fuentes.items()
-        if digest is not None
-    }:
-        motivos.append("Los hashes de las fuentes no coinciden con los revisados.")
-
-    combinaciones_esperadas = {item["id"] for item in EXALT_COMBINACIONES}
-    if atestacion.combinaciones_verificadas != combinaciones_esperadas:
-        motivos.append("La revisión no cubre exactamente las tres combinaciones Exalt.")
-    if atestacion.campos_verificados != CAMPOS_REVISION_MANUAL_EXALT:
-        motivos.append(
-            "La revisión no cubre todos los campos y restricciones requeridos."
-        )
-
+    for nombre, campo in evidencia.items():
+        estado = campo.estado
+        citas = campo.citas
+        if estado == "desconocido":
+            if not campo.motivo:
+                motivos.append(f"El campo desconocido {nombre} carece de motivo.")
+            continue
+        if not citas:
+            motivos.append(f"El campo {nombre} no tiene citas.")
+            continue
+        for cita in citas:
+            archivo = cita.archivo
+            digest = cita.sha256
+            if not archivo or digest is None:
+                motivos.append(f"La cita del campo {nombre} carece de archivo o hash.")
+                continue
+            if hashes_actuales.get(archivo) != digest:
+                motivos.append(
+                    f"El hash de la fuente de {nombre} no coincide con el archivo actual."
+                )
+            if (
+                cita.metodo_verificacion == "extraccion_textual_pdf"
+                and paginas is not None
+            ):
+                match = re.search(r"Página (\d+)", cita.ubicacion)
+                if match is None:
+                    motivos.append(f"La cita PDF de {nombre} carece de página.")
+                    continue
+                texto_pagina = paginas.get(int(match.group(1)), "")
+                if normalizar_fragmento_evidencia(
+                    cita.fragmento
+                ) not in normalizar_fragmento_evidencia(texto_pagina):
+                    motivos.append(
+                        f"El fragmento de {nombre} no aparece en la página citada."
+                    )
+            elif (
+                cita.archivo == COFEPRIS_EXALT_EVIDENCE
+                and cita.metodo_verificacion == "inspeccion_visual_asistida_por_agente"
+                and not cita.no_verificado_por_ocr
+            ):
+                motivos.append(
+                    f"La cita visual de {nombre} debe indicar que no fue verificada por OCR."
+                )
+    if "limitacion_documental" not in evidencia:
+        motivos.append("No se declaró la limitación de autoridad de la etiqueta.")
     return not motivos, motivos
 
 
-def cargar_revision_manual_exalt() -> tuple[bool, list[str], dict[str, str | None]]:
-    """Verifica existencia e integridad de las fuentes y carga la atestación manual."""
-    rutas = {
-        EXALT_LABEL: DATA_RAW / EXALT_LABEL,
-        COFEPRIS_EXALT_EVIDENCE: DATA_RAW / COFEPRIS_EXALT_EVIDENCE,
-    }
-    hashes = {nombre: hash_sha256(ruta) for nombre, ruta in rutas.items()}
-    if not REVISION_MANUAL_EXALT.is_file():
-        revision = None
-    else:
-        with REVISION_MANUAL_EXALT.open(encoding="utf-8") as archivo:
-            revision = json.load(archivo)
-    aprobada, motivos = validar_revision_manual_exalt(revision, hashes)
-    return aprobada, motivos, hashes
+def puede_aprobar_exalt(
+    evidencia: dict[str, EvidenciaCampo],
+    evidencia_completa_y_vigente: bool,
+) -> bool:
+    """Acepta una revisión asistida solo con evidencia de etiqueta oficial verificable."""
+    etiqueta_oficial = evidencia.get("etiqueta_oficial_verificada")
+    return (
+        evidencia_completa_y_vigente
+        and etiqueta_oficial is not None
+        and etiqueta_oficial.valor is True
+        and etiqueta_oficial.estado == "respaldado_en_fuente"
+        and bool(etiqueta_oficial.citas)
+    )
 
 
 # ==============================================================================
@@ -726,10 +1140,14 @@ def construir_texto_exalt(
                 "no fue emitida ni aprobada por COFEPRIS."
             ),
             "Producto: Exalt. Titular indicado en la etiqueta: CORTEVA MX, S. A. DE C.V.",
-            f"Cultivo: {combinacion['cultivo']} ({combinacion['cultivo_cientifico']}).",
+            f"Cultivo: {combinacion['cultivo']}.",
             f"Problema fitosanitario: {combinacion['problema_fitosanitario']}.",
             f"Dosis transcrita: {combinacion['dosis_texto']} mL/ha.",
-            "Intervalo de seguridad: 1 día según el indicador (1) definido en la etiqueta.",
+            f"Marcador de grupo de cultivos: {combinacion['marcador_grupo_cultivos']}.",
+            (
+                "Intervalo de seguridad interpretado como 1 día a partir del marcador "
+                "(1) y de la leyenda de IS en días; requiere cotejo con etiqueta oficial."
+            ),
             "Periodo de reentrada: 4 horas.",
             "--- Evidencia de identificación del producto (etiqueta ilustrativa, página 1) ---\n"
             + pagina_identificacion.strip(),
@@ -749,29 +1167,10 @@ def construir_texto_exalt(
     )
 
 
-def plantilla_revision_manual_exalt(
-    hashes_fuentes: dict[str, str | None],
-) -> dict[str, Any]:
-    """Genera un formato sin aprobar ni atribuir una revisión inexistente."""
-    return {
-        "revisor": None,
-        "fecha_revision": None,
-        "aprobada": False,
-        "hashes_fuentes": hashes_fuentes,
-        "combinaciones_verificadas": [],
-        "campos_verificados": sorted(CAMPOS_REVISION_MANUAL_EXALT),
-        "instrucciones": (
-            "Complete esta atestación solo después de revisar manualmente cada fuente. "
-            "Guárdela como data/raw/revision_manual_exalt.json. No cambie los hashes "
-            "para aceptar una fuente distinta; vuelva a revisar y registre su hash."
-        ),
-    }
-
-
 def crear_fichas_exalt_validadas(
     ruta_json: Path,
 ) -> list[FichaFitosanitaria]:
-    """Crea candidatos por combinación y los aprueba solo con revisión humana vigente."""
+    """Crea candidatos con trazas asistidas; no confunde revisión con autorización."""
     with ruta_json.open(encoding="utf-8") as archivo:
         documentos = json.load(archivo)
 
@@ -782,15 +1181,17 @@ def crear_fichas_exalt_validadas(
     if documento is None:
         return []
 
-    revision_aprobada, motivos_revision, hashes = cargar_revision_manual_exalt()
-    captura_disponible = hashes[COFEPRIS_EXALT_EVIDENCE] is not None
-    fecha_revision: str | None = None
-    revisor: str | None = None
-    if revision_aprobada:
-        with REVISION_MANUAL_EXALT.open(encoding="utf-8") as archivo:
-            atestacion = RevisionManualExalt.model_validate(json.load(archivo))
-        fecha_revision = atestacion.fecha_revision.isoformat()
-        revisor = atestacion.revisor
+    rutas_fuentes = {
+        EXALT_LABEL: DATA_RAW / EXALT_LABEL,
+        COFEPRIS_EXALT_EVIDENCE: DATA_RAW / COFEPRIS_EXALT_EVIDENCE,
+    }
+    hashes = {archivo: hash_sha256(ruta) for archivo, ruta in rutas_fuentes.items()}
+    paginas = {pagina["pagina"]: pagina["texto"] for pagina in documento["paginas"]}
+    disclaimer = "ESTE DOCUMENTO TIENE FINES ILUSTRATIVOS ÚNICAMENTE."
+    if disclaimer not in paginas.get(1, ""):
+        raise ValueError(
+            "El PDF de Exalt ya no contiene la limitación ilustrativa revisada."
+        )
 
     fuente_etiqueta = documento["documento_o_url"]
     hash_etiqueta = hashes[EXALT_LABEL]
@@ -798,28 +1199,40 @@ def crear_fichas_exalt_validadas(
 
     for combinacion in EXALT_COMBINACIONES:
         texto = construir_texto_exalt(documento, combinacion)
-        fuentes_adicionales = []
-        if captura_disponible:
-            fuentes_adicionales.append(
-                TrazabilidadFuente(
-                    documento_o_url=f"data/raw/{COFEPRIS_EXALT_EVIDENCE}",
-                    ubicacion_fuente=(
-                        "Captura del detalle del registro: registro, titular, "
-                        "cultivos listados y vigencia. No acredita la dosis ni "
-                        "el problema fitosanitario."
-                    ),
-                    fecha_consulta=fecha_revision,
-                    sha256=hashes[COFEPRIS_EXALT_EVIDENCE],
-                )
-            )
-
-        nota_revision = (
-            f"Atestación de revisión manual registrada por {revisor} el {fecha_revision}; "
-            "los hashes de las fuentes y las tres combinaciones coinciden."
-            if revision_aprobada
-            else "Pendiente de revisión manual documentada. "
-            + " ".join(motivos_revision)
+        evidencia = construir_evidencia_campos_exalt(documento, combinacion, hashes)
+        evidencia_completa, motivos_evidencia = validar_evidencia_documental_exalt(
+            evidencia,
+            paginas,
+            hashes,
         )
+        # La revisión asistida no reemplaza una etiqueta autorizada verificable.
+        aprobada = puede_aprobar_exalt(evidencia, evidencia_completa)
+        estado = (
+            "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
+            if evidencia_completa
+            else "EVIDENCIA_INCOMPLETA_O_FUENTE_CAMBIADA"
+        )
+        nota_revision = (
+            "Revisión documental asistida por agente; no representa firma ni "
+            "aprobación humana. La etiqueta web se declara ilustrativa y no es "
+            "una etiqueta real; la captura COFEPRIS no valida dosis ni plaga. "
+            "Pendiente de cotejo con etiqueta oficial."
+            if evidencia_completa
+            else "La revisión asistida no pasó los controles: "
+            + " ".join(motivos_evidencia)
+        )
+        fuentes_adicionales = [
+            TrazabilidadFuente(
+                documento_o_url=f"data/raw/{COFEPRIS_EXALT_EVIDENCE}",
+                ubicacion_fuente=(
+                    "Inspección visual del detalle: registro, empresa, ingrediente, "
+                    "nombres comerciales, cultivos listados y vigencia 19/06/2028. "
+                    "La captura no acredita dosis, plaga ni fecha de consulta."
+                ),
+                fecha_consulta=None,
+                sha256=hashes[COFEPRIS_EXALT_EVIDENCE],
+            )
+        ]
         fichas.append(
             FichaFitosanitaria(
                 id_registro=combinacion["id"],
@@ -844,7 +1257,7 @@ def crear_fichas_exalt_validadas(
                         f"página {combinacion['pagina']}: fila de cultivo/plaga/dosis; "
                         "página 3: definición del indicador (1) y reentrada."
                     ),
-                    fecha_consulta=fecha_revision,
+                    fecha_consulta=None,
                     sha256=hash_etiqueta,
                 ),
                 fuentes_adicionales=fuentes_adicionales,
@@ -855,7 +1268,9 @@ def crear_fichas_exalt_validadas(
                     "consulta documental de COFEPRIS. No es una ficha emitida o "
                     "aprobada por COFEPRIS. " + nota_revision
                 ),
-                revision_documental_aprobada=revision_aprobada,
+                revision_documental_aprobada=aprobada,
+                evidencia_documental=evidencia,
+                estado_revision_documental=estado,
             )
         )
 
@@ -879,39 +1294,42 @@ def clasificar_y_exportar(
     ruta_chunks = directorio / "chunks_corpus.json"
     ruta_pendientes = directorio / "registros_pendientes_revision.json"
     ruta_candidatos = directorio / "chunks_candidatos_revision.json"
-    ruta_plantilla = directorio / "revision_manual_exalt.template.json"
-
-    revision_actual_aprobada, motivos_revision, hashes_fuentes = (
-        cargar_revision_manual_exalt()
-    )
+    ruta_revision = directorio / EXALT_REVIEW_REPORT
+    ruta_plantilla_obsoleta = directorio / "revision_manual_exalt.template.json"
+    if ruta_plantilla_obsoleta.is_file():
+        ruta_plantilla_obsoleta.unlink()
+    hashes_actuales = {
+        EXALT_LABEL: hash_sha256(DATA_RAW / EXALT_LABEL),
+        COFEPRIS_EXALT_EVIDENCE: hash_sha256(DATA_RAW / COFEPRIS_EXALT_EVIDENCE),
+    }
     fichas_clasificadas: list[FichaFitosanitaria] = []
     for ficha in fichas:
-        if (
-            ficha.id_registro.startswith("FICH-EXALT-")
-            and ficha.revision_documental_aprobada
-        ):
-            hashes_ficha = {
-                EXALT_LABEL: ficha.trazabilidad.sha256,
-                COFEPRIS_EXALT_EVIDENCE: next(
-                    (
-                        fuente.sha256
-                        for fuente in ficha.fuentes_adicionales
-                        if fuente.documento_o_url.endswith(COFEPRIS_EXALT_EVIDENCE)
-                    ),
-                    None,
-                ),
-            }
-            if not revision_actual_aprobada or hashes_ficha != hashes_fuentes:
-                ficha = ficha.model_copy(
-                    update={
-                        "revision_documental_aprobada": False,
-                        "observaciones": (
-                            (ficha.observaciones or "")
-                            + " Aprobación retirada al exportar: "
-                            + " ".join(motivos_revision)
-                        ).strip(),
-                    }
-                )
+        if ficha.id_registro.startswith("FICH-EXALT-"):
+            evidencia_completa, motivos_evidencia = validar_evidencia_documental_exalt(
+                ficha.evidencia_documental,
+                None,
+                hashes_actuales,
+            )
+            estado = (
+                "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
+                if evidencia_completa
+                else "EVIDENCIA_INCOMPLETA_O_FUENTE_CAMBIADA"
+            )
+            nota_estado = (
+                "La fuente de dosis/usos es ilustrativa, no una etiqueta real."
+                if evidencia_completa
+                else "La revisión asistida quedó invalidada: "
+                + " ".join(motivos_evidencia)
+            )
+            ficha = ficha.model_copy(
+                update={
+                    "revision_documental_aprobada": False,
+                    "estado_revision_documental": estado,
+                    "observaciones": (
+                        (ficha.observaciones or "") + " " + nota_estado
+                    ).strip(),
+                }
+            )
         fichas_clasificadas.append(ficha)
 
     validadas = [f for f in fichas_clasificadas if f.esta_completa_para_recomendacion()]
@@ -942,9 +1360,17 @@ def clasificar_y_exportar(
                 "dosis_minima": f.dosis.minima if f.dosis else None,
                 "dosis_maxima": f.dosis.maxima if f.dosis else None,
                 "dosis_unidad": f.dosis.unidad if f.dosis else None,
+                "marcador_grupo_cultivos": f.evidencia_documental.get(
+                    "marcador_grupo_cultivos", {}
+                ).valor,
                 "is_dias": f.is_dias,
                 "periodo_reingreso_horas": f.periodo_reingreso_horas,
                 "aprobado_omri": f.aprobado_omri,
+                "revision_documental_aprobada": f.revision_documental_aprobada,
+                "estado_revision_documental": f.estado_revision_documental,
+                "evidencia_documental": serializar_evidencia_campos(
+                    f.evidencia_documental
+                ),
                 "documento_fuente": f.trazabilidad.documento_o_url,
                 "sha256_fuente": f.trazabilidad.sha256,
                 "ubicacion_fuente": f.trazabilidad.ubicacion_fuente,
@@ -974,10 +1400,17 @@ def clasificar_y_exportar(
                 "dosis_minima": f.dosis.minima if f.dosis else None,
                 "dosis_maxima": f.dosis.maxima if f.dosis else None,
                 "dosis_unidad": f.dosis.unidad if f.dosis else None,
+                "marcador_grupo_cultivos": f.evidencia_documental.get(
+                    "marcador_grupo_cultivos", {}
+                ).valor,
                 "is_dias": f.is_dias,
                 "periodo_reingreso_horas": f.periodo_reingreso_horas,
                 "aprobado_omri": f.aprobado_omri,
                 "revision_documental_aprobada": f.revision_documental_aprobada,
+                "estado_revision_documental": f.estado_revision_documental,
+                "evidencia_documental": serializar_evidencia_campos(
+                    f.evidencia_documental
+                ),
                 "documento_fuente": f.trazabilidad.documento_o_url,
                 "sha256_fuente": f.trazabilidad.sha256,
                 "ubicacion_fuente": f.trazabilidad.ubicacion_fuente,
@@ -1017,13 +1450,59 @@ def clasificar_y_exportar(
     with open(ruta_pendientes, "w", encoding="utf-8") as f:
         json.dump(datos_pendientes, f, ensure_ascii=False, indent=2)
 
-    with ruta_plantilla.open("w", encoding="utf-8") as f:
-        json.dump(
-            plantilla_revision_manual_exalt(hashes_fuentes),
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+    informe_revision = {
+        "tipo_revision": "documental_asistida_por_agente",
+        "revisor": EXALT_AGENT_REVIEWER,
+        "es_revisor_humano": False,
+        "aprobacion_humana": False,
+        "fecha_revision": EXALT_AGENT_REVIEWED_AT,
+        "metodo": (
+            "Extracción textual de páginas PDF con pypdf y cotejo directo de la "
+            "captura PNG mediante inspección visual. La captura no se trató como "
+            "verificación OCR."
+        ),
+        "hashes_revisados": EXALT_REVIEWED_SOURCE_HASHES,
+        "hashes_actuales": hashes_actuales,
+        "alcance_cofepris": (
+            "La captura muestra registro, empresa, ingrediente, nombres comerciales, "
+            "usos listados y vigencia 19/06/2028; no muestra dosis, plagas por cultivo "
+            "ni fecha de consulta."
+        ),
+        "resultado": "PENDIENTE",
+        "revision_asistida_completa": all(
+            ficha.estado_revision_documental
+            == "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
+            for ficha in candidatos_exalt
+        ),
+        "etiqueta_oficial_verificada": all(
+            ficha.evidencia_documental["etiqueta_oficial_verificada"].valor is True
+            for ficha in candidatos_exalt
+        ),
+        "aprobacion_corpus_elegible": bool(candidatos_exalt)
+        and all(ficha.revision_documental_aprobada for ficha in candidatos_exalt),
+        "motivo_bloqueo": (
+            "La etiqueta web se declara ilustrativa y no es una etiqueta real. "
+            "La captura COFEPRIS no corrobora dosis ni combinaciones cultivo/plaga; "
+            "se requiere una etiqueta oficial verificable antes de indexar."
+        ),
+        "fichas": [
+            {
+                "id_registro": f.id_registro,
+                "estado": f.estado_revision_documental,
+                "revision_documental_aprobada": f.revision_documental_aprobada,
+                "evidencia_completa_y_vigente": (
+                    f.estado_revision_documental
+                    == "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
+                ),
+                "evidencia_por_campo": serializar_evidencia_campos(
+                    f.evidencia_documental
+                ),
+            }
+            for f in candidatos_exalt
+        ],
+    }
+    with ruta_revision.open("w", encoding="utf-8") as f:
+        json.dump(informe_revision, f, ensure_ascii=False, indent=2)
 
     return {
         "total_procesadas": len(fichas),
@@ -1034,7 +1513,7 @@ def clasificar_y_exportar(
         "ruta_chunks": ruta_chunks,
         "ruta_pendientes": ruta_pendientes,
         "ruta_candidatos": ruta_candidatos,
-        "ruta_plantilla_revision": ruta_plantilla,
+        "ruta_revision_documental": ruta_revision,
     }
 
 
@@ -1066,18 +1545,19 @@ def crear_instrucciones_paquete() -> str:
 3. Instale las dependencias del repositorio con `python -m pip install -r requirements.txt`.
 4. Ejecute `python src/data_ingest.py` para regenerar las extracciones y los JSON.
 5. `data/processed/chunks_candidatos_revision.json` es una salida de auditoría,
-   no debe cargarse al índice RAG. Solo `chunks_corpus.json` contiene fichas con
-   revisión documentada vigente.
-6. Para proponer la aprobación manual de Exalt, revise las dos fuentes y las tres
-   combinaciones. Complete `data/processed/revision_manual_exalt.template.json`,
-   guárdela como `data/raw/revision_manual_exalt.json` y registre revisor, fecha,
-   hashes intactos, campos y combinaciones revisadas. Vuelva a ejecutar el pipeline.
-   Si falta o cambia una fuente, el pipeline mantiene las fichas en cuarentena.
+   no debe cargarse al índice RAG. `revision_documental_exalt.json` contiene el
+   cotejo asistido, las citas por campo y los motivos concretos para mantener
+   Exalt pendiente.
+6. La revisión asistida por agente no equivale a firma, aprobación humana ni
+   autorización regulatoria. Exalt solo podrá aprobarse cuando evidencia completa
+   y consistente provenga de una etiqueta oficial verificable; si una fuente cambia
+   o falta, la revisión ligada a sus hashes deja de ser vigente.
 
-La etiqueta de Exalt incluida se identifica como ilustrativa; las fichas son
-elaboradas por PhytoRAG-Tropical y no son emitidas ni aprobadas por COFEPRIS.
-No se infiere aprobación OMRI ni compatibilidad de exportación. Este paquete no
-constituye una recomendación agronómica ni una validación de “cero alucinaciones”.
+La etiqueta web de Exalt se identifica como ilustrativa y no es una etiqueta real.
+La captura COFEPRIS acredita solo los datos visibles del registro (no dosis ni plaga).
+Las fichas son elaboradas por PhytoRAG-Tropical y no son emitidas ni aprobadas por
+COFEPRIS. No se infiere aprobación OMRI ni compatibilidad de exportación. Este
+paquete no constituye una recomendación agronómica ni demuestra “cero alucinaciones”.
 """
 
 
@@ -1103,22 +1583,33 @@ def crear_manifiesto_y_paquete() -> Path:
             f"| `{relativo}` | {ruta.stat().st_size} | `{hash_sha256(ruta)}` |"
         )
 
-    aprobada, motivos, hashes = cargar_revision_manual_exalt()
+    hashes = {
+        EXALT_LABEL: hash_sha256(DATA_RAW / EXALT_LABEL),
+        COFEPRIS_EXALT_EVIDENCE: hash_sha256(DATA_RAW / COFEPRIS_EXALT_EVIDENCE),
+    }
+    informe_path = DATA_PROCESSED / EXALT_REVIEW_REPORT
+    if informe_path.is_file():
+        informe = json.loads(informe_path.read_text(encoding="utf-8"))
+    else:
+        informe = {
+            "resultado": "PENDIENTE",
+            "motivo_bloqueo": "No se generó el informe de revisión documental.",
+        }
     estado_revision = (
-        "aprobada mediante atestación manual vinculada a hashes"
-        if aprobada
-        else "pendiente; fichas Exalt excluidas del corpus aprobable"
+        "revisión asistida por agente; fichas pendientes de etiqueta oficial"
     )
-    motivo_texto = " ".join(motivos) if motivos else "Sin pendientes."
+    motivo_texto = informe.get("motivo_bloqueo", "Sin detalle de bloqueo.")
     commit_base = "454225a2958da55ed2961f19f173589c1272a7ed"
     manifiesto_lineas = [
         "# Manifiesto de datos PhytoRAG-Tropical — M1\n\n"
         + f"- Commit de código de partida verificado: `{commit_base}`.\n"
         + f"- SHA-256 del código de ingesta ejecutado: `{hash_sha256(PROJECT_ROOT / 'src' / 'data_ingest.py')}`.\n"
         + f"- Python: `{platform.python_version()}`.\n"
-        + f"- Estado de revisión manual Exalt: **{estado_revision}**.\n"
+        + f"- Estado de revisión asistida Exalt: **{estado_revision}**.\n"
         + f"- Observaciones de revisión: {motivo_texto}\n"
-        + "- Una captura presente no se considera validación automática de su contenido.\n"
+        + f"- Revisor documental: `{EXALT_AGENT_REVIEWER}` (agente; no humano).\n"
+        + f"- Fecha de cotejo: `{EXALT_AGENT_REVIEWED_AT}`.\n"
+        + "- La captura se inspeccionó visualmente; no se trató como validación OCR.\n"
         + "- Los hashes listados identifican las versiones exactas incluidas en este paquete.\n\n"
         + "## Hashes SHA-256 y tamaños\n\n"
         + "| Archivo | Bytes | SHA-256 |\n|---|---:|---|\n"
@@ -1129,21 +1620,20 @@ def crear_manifiesto_y_paquete() -> Path:
             f"| `{nombre}` | `{version}` |"
             for nombre, version in versiones_dependencias().items()
         )
-        + "\n\n## Estado de revisión manual\n\n"
+        + "\n\n## Estado del cotejo documental\n\n"
         + f"- Captura COFEPRIS Exalt: `{hashes[COFEPRIS_EXALT_EVIDENCE]}`.\n"
         + f"- Etiqueta ilustrativa Exalt: `{hashes[EXALT_LABEL]}`.\n"
+        + "- Dosis y plagas: respaldadas únicamente por documento ilustrativo.\n"
+        + "- Fecha de consulta COFEPRIS: desconocida; la captura solo muestra vigencia.\n"
+        + "- Aprobación humana: no registrada ni atribuida.\n"
     ]
-    if not aprobada:
-        manifiesto_lineas.append(
-            "- No hay atestación manual vigente que apruebe las fichas Exalt.\n"
-        )
+    manifiesto_lineas.append(
+        "- No se aprueba Exalt para indexación hasta cotejar la etiqueta oficial.\n"
+    )
     manifiesto = "".join(manifiesto_lineas)
     ruta_manifiesto.write_text(manifiesto, encoding="utf-8")
 
     archivos_paquete = [*archivos, ruta_manifiesto]
-    revision_real = DATA_RAW / REVISION_MANUAL_EXALT.name
-    if revision_real.is_file():
-        archivos_paquete.append(revision_real)
     with zipfile.ZipFile(
         ruta_paquete, "w", compression=zipfile.ZIP_DEFLATED
     ) as paquete:
@@ -1216,7 +1706,10 @@ if __name__ == "__main__":
             f"  * Intervalo seguridad (IS): {f_val.is_dias} día | "
             f"Reingreso: {f_val.periodo_reingreso_horas} horas"
         )
-        print(f"  * Revisión manual vigente: {f_val.revision_documental_aprobada}")
+        print(
+            f"  * Estado de revisión: {f_val.estado_revision_documental} "
+            f"(aprobada para RAG: {f_val.revision_documental_aprobada})"
+        )
         print(f"  * Fuentes con hash registrado: {len(f_val.fuentes_adicionales) + 1}")
 
     print(
@@ -1228,7 +1721,7 @@ if __name__ == "__main__":
         f"  * Chunks aprobados: {resultado['ruta_chunks']}\n"
         f"  * Chunks candidatos (no indexar): {resultado['ruta_candidatos']}\n"
         f"  * Archivo de pendientes: {resultado['ruta_pendientes']}\n"
-        f"  * Plantilla de revisión: {resultado['ruta_plantilla_revision']}"
+        f"  * Informe campo por campo: {resultado['ruta_revision_documental']}"
     )
 
     print(f"[REVISION] Documentos de productos guardados en: {ruta_documentos}")
