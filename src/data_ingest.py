@@ -765,6 +765,37 @@ def serializar_metadatos_ficha(ficha: FichaFitosanitaria) -> dict[str, Any]:
     }
 
 
+def serializar_ficha_motor_rag(ficha: FichaFitosanitaria) -> dict[str, Any]:
+    """Adapta una ficha aprobada al contrato plano que consume MotorPhytoRAG."""
+    dosis = ficha.dosis
+    dosis_autorizada = None
+    if dosis is not None:
+        dosis_autorizada = f"{dosis.texto_etiqueta} {dosis.unidad}".strip()
+
+    return {
+        "id": ficha.id_registro,
+        "producto_comercial": ficha.producto_comercial,
+        "ingrediente_activo": ficha.ingrediente_activo,
+        "registro_sanitario_cofepris": ficha.registro_cofepris,
+        "cultivo": ficha.cultivo,
+        "problema_fitosanitario": ficha.problema_fitosanitario,
+        "dosis_autorizada": dosis_autorizada,
+        "intervalo_seguridad_dias": ficha.is_dias,
+        "aprobado_omri": ficha.aprobado_omri,
+        "compatible_exportacion_usda": None,
+        "recomendacion_agronomica": None,
+        "fragmento_oficial_citado": ficha.texto_fragmento,
+        "fuente_documental": ficha.trazabilidad.documento_o_url,
+        "estado_verificacion": ficha.estado_revision_documental,
+        "trazabilidad_fuente": {
+            "ubicacion": ficha.trazabilidad.ubicacion_fuente,
+            "fecha_consulta": ficha.trazabilidad.fecha_consulta,
+            "sha256": ficha.trazabilidad.sha256,
+        },
+        "texto_completo": ficha.texto_fragmento or "",
+    }
+
+
 def construir_evidencia_campos_exalt(
     documento: dict[str, Any],
     combinacion: dict[str, Any],
@@ -1617,6 +1648,7 @@ def clasificar_y_exportar(
 
     ruta_vademecum = directorio / "vademecum_fitosanitario.json"
     ruta_chunks = directorio / "chunks_corpus.json"
+    ruta_motor_rag = directorio / "corpus_motor_rag.json"
     ruta_pendientes = directorio / "registros_pendientes_revision.json"
     ruta_candidatos = directorio / "chunks_candidatos_revision.json"
     ruta_revision = directorio / EXALT_REVIEW_REPORT
@@ -1685,7 +1717,12 @@ def clasificar_y_exportar(
     with open(ruta_chunks, "w", encoding="utf-8") as f:
         json.dump(chunks, f, ensure_ascii=False, indent=2)
 
-    # 3. Chunks de inspección separados del índice que consume el motor RAG.
+    # 3. Contrato plano explícito para MotorPhytoRAG; nunca incluye cuarentena.
+    corpus_motor_rag = [serializar_ficha_motor_rag(ficha) for ficha in validadas]
+    with open(ruta_motor_rag, "w", encoding="utf-8") as f:
+        json.dump(corpus_motor_rag, f, ensure_ascii=False, indent=2)
+
+    # 4. Chunks de inspección separados del índice que consume el motor RAG.
     chunks_candidatos = [
         ChunkCorpus(
             id_documento=f.id_registro,
@@ -1697,7 +1734,7 @@ def clasificar_y_exportar(
     with open(ruta_candidatos, "w", encoding="utf-8") as f:
         json.dump(chunks_candidatos, f, ensure_ascii=False, indent=2)
 
-    # 4. Registros pendientes de revisión (cuarentena trazable).
+    # 5. Registros pendientes de revisión (cuarentena trazable).
     datos_pendientes = [
         {
             "ficha": f.model_dump(),
@@ -1796,6 +1833,7 @@ def clasificar_y_exportar(
         "total_candidatos_exalt": len(candidatos_exalt),
         "ruta_vademecum": ruta_vademecum,
         "ruta_chunks": ruta_chunks,
+        "ruta_motor_rag": ruta_motor_rag,
         "ruta_pendientes": ruta_pendientes,
         "ruta_candidatos": ruta_candidatos,
         "ruta_revision_documental": ruta_revision,
@@ -1830,14 +1868,25 @@ def crear_instrucciones_paquete() -> str:
    intérprete.
 3. Instale las dependencias del repositorio con `python -m pip install -r requirements.txt`.
 4. Ejecute `python src/data_ingest.py` para regenerar las extracciones y los JSON.
-5. `data/processed/chunks_candidatos_revision.json` es una salida de auditoría,
+5. `data/processed/corpus_motor_rag.json` es el contrato plano de entrada para
+   MotorPhytoRAG. Solo contiene fichas aprobadas y usa `id`, `texto_completo`,
+   `cultivo`, `problema_fitosanitario`, `ingrediente_activo`,
+   `registro_sanitario_cofepris`, `dosis_autorizada`,
+   `intervalo_seguridad_dias`, `aprobado_omri` y trazabilidad. En esta versión
+   contiene una lista vacía porque no hay fichas aprobadas.
+6. `data/processed/chunks_corpus.json` es el contrato estructurado equivalente
+   (`id_documento`, `texto`, `metadatos`) y también está vacío. No uses
+   `chunks_candidatos_revision.json` para indexación: es auditoría.
+7. `data/processed/chunks_candidatos_revision.json` es una salida de auditoría,
    no debe cargarse al índice RAG. `revision_documental_exalt.json` contiene el
    cotejo asistido y `busqueda_documental_exalt.json` añade las citas de la ficha
    técnica de Corteva, sus límites y el documento que falta para levantar la
    cuarentena. `investigacion_documental_bloqueos.json` registra las fuentes OMRI,
    LPO, Exalt y Engeo consultadas para el Issue #1 y contiene borradores de
    solicitudes documentales que no se han enviado.
-6. La revisión asistida por agente no equivale a firma, aprobación humana ni
+   El Dr. Carlos autorizó utilizar esos borradores; la autorización no implica
+   que ya se hayan transmitido.
+8. La revisión asistida por agente no equivale a firma, aprobación humana ni
    autorización regulatoria. Exalt solo podrá aprobarse cuando evidencia completa
    y consistente provenga de una etiqueta oficial verificable; si una fuente cambia
    o falta, la revisión ligada a sus hashes deja de ser vigente.

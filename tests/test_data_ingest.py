@@ -16,6 +16,7 @@ from src.data_ingest import (
     construir_informe_busqueda_documental_exalt,
     construir_texto_exalt,
     puede_aprobar_exalt,
+    serializar_ficha_motor_rag,
     serializar_metadatos_ficha,
     validar_evidencia_documental_exalt,
 )
@@ -135,6 +136,40 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
         self.assertEqual(metadatos["registro_cofepris"], "RSCO-TEST")
         self.assertIsNone(metadatos["is_dias"])
         self.assertIsNone(metadatos["aprobado_omri"])
+
+    def test_contrato_motor_rag_preserva_texto_y_desconocidos(self) -> None:
+        ficha = FichaFitosanitaria(
+            id_registro="FICH-TEST-002",
+            cultivo="Limonero",
+            problema_fitosanitario="Diaphorina citri",
+            producto_comercial="Exalt",
+            ingrediente_activo="spinetoram",
+            registro_cofepris="RSCO-TEST",
+            dosis=DosisEspecificacion(
+                minima=400,
+                maxima=600,
+                unidad="mL/ha",
+                texto_etiqueta="400 - 600",
+            ),
+            is_dias=1,
+            aprobado_omri=None,
+            texto_fragmento="Texto documental completo.",
+            trazabilidad=TrazabilidadFuente(
+                documento_o_url="etiqueta.pdf",
+                ubicacion_fuente="Página 4",
+                sha256="b" * 64,
+            ),
+        )
+
+        contrato = serializar_ficha_motor_rag(ficha)
+
+        self.assertEqual(contrato["id"], "FICH-TEST-002")
+        self.assertEqual(contrato["texto_completo"], "Texto documental completo.")
+        self.assertEqual(contrato["dosis_autorizada"], "400 - 600 mL/ha")
+        self.assertEqual(contrato["intervalo_seguridad_dias"], 1)
+        self.assertIsNone(contrato["aprobado_omri"])
+        self.assertIsNone(contrato["compatible_exportacion_usda"])
+        self.assertEqual(contrato["trazabilidad_fuente"]["sha256"], "b" * 64)
 
     def test_chunks_separan_combinaciones_y_conservan_restricciones(self) -> None:
         chunks = {
