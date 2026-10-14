@@ -1882,8 +1882,9 @@ def crear_instrucciones_paquete() -> str:
    cotejo asistido y `busqueda_documental_exalt.json` añade las citas de la ficha
    técnica de Corteva, sus límites y el documento que falta para levantar la
    cuarentena. `investigacion_documental_bloqueos.json` registra las fuentes OMRI,
-   LPO, Exalt y Engeo consultadas para el Issue #1 y contiene borradores de
-   solicitudes documentales que no se han enviado.
+   LPO, Exalt y Engeo consultadas para el Issue #1. Los borradores con datos de
+   contacto se conservan localmente en `solicitudes_documentales_local.json` y
+   no forman parte de este paquete.
    El Dr. Carlos autorizó utilizar esos borradores; la autorización no implica
    que ya se hayan transmitido.
 8. La revisión asistida por agente no equivale a firma, aprobación humana ni
@@ -1916,11 +1917,10 @@ elaboradas por PhytoRAG-Tropical y no son emitidas ni aprobadas por COFEPRIS. No
 infiere aprobación orgánica ni compatibilidad de exportación. Este paquete no
 constituye una recomendación agronómica ni demuestra “cero alucinaciones”.
 
-Los borradores de solicitudes a Corteva, Syngenta, COFEPRIS y SENASICA en
-`investigacion_documental_bloqueos.json` no se han enviado. El remitente ya fue
-identificado y autorizó sus datos de contacto; debe revisar los textos y presentar
-personalmente las solicitudes en los canales disponibles. No se afirma que hayan
-sido transmitidas.
+Los borradores y estados de las solicitudes a Corteva, Syngenta, COFEPRIS y
+SENASICA se conservan fuera del paquete en `solicitudes_documentales_local.json`;
+los datos de contacto no se incluyen aquí. El paquete no registra ni transmite
+solicitudes; el estado de envío debe consultarse en el archivo local.
 """
 
 
@@ -1938,7 +1938,16 @@ def crear_manifiesto_y_paquete() -> Path:
         PROJECT_ROOT / "requirements.txt",
         ruta_instrucciones,
     ]
-    archivos = [path for path in archivos if path.name != ".gitkeep"]
+    archivos = [
+        path
+        for path in archivos
+        if path.name
+        not in {
+            ".gitkeep",
+            "investigacion_documental_bloqueos.json",
+            "solicitudes_documentales_local.json",
+        }
+    ]
     filas = []
     for ruta in archivos:
         relativo = ruta.relative_to(PROJECT_ROOT).as_posix()
@@ -2018,11 +2027,11 @@ def crear_manifiesto_y_paquete() -> Path:
         + "- La consulta de texto de la lista LPO no sustituye el cotejo con su "
         + "versión digitalizada; Exalt y Engeo permanecen sin aprobación orgánica.\n"
         + "- `investigacion_documental_bloqueos.json` conserva URLs, hashes, "
-        + "hallazgos y límites de las fuentes consultadas.\n"
-        + "- El mismo informe incluye borradores de solicitudes a Corteva, "
-        + "Syngenta, COFEPRIS y SENASICA; no se han enviado. El remitente fue "
-        + "identificado, pero debe revisar y transmitir las solicitudes "
-        + "personalmente.\n"
+        + "hallazgos y límites de las fuentes consultadas; se excluye del ZIP "
+        + "porque contiene datos de contacto y borradores.\n"
+        + "- Los borradores y estados de las solicitudes se conservan fuera del ZIP "
+        + "en `solicitudes_documentales_local.json`; los datos de contacto no se "
+        + "incluyen en este paquete.\n"
         + "- Aprobación humana: no registrada ni atribuida.\n"
     ]
     manifiesto_lineas.append(
