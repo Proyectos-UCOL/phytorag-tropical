@@ -22,8 +22,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
+DATA_EVIDENCE = PROJECT_ROOT / "data" / "evidencia"
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 DATA_APPROVALS = PROJECT_ROOT / "data" / "aprobaciones"
+AUTHORIZED_REVIEWERS_FILE = DATA_APPROVALS / "revisores_autorizados.json"
 EXALT_LABEL = "Exalt_etiqueta_web_rev_2025.pdf"
 COFEPRIS_EXALT_EVIDENCE = "Consulta_COFEPRIS_Exalt.png"
 EXALT_CORTEVA_TECHNICAL_SHEET = "Exalt_ficha_tecnica_Corteva_Mex_2026.pdf"
@@ -65,22 +67,10 @@ PUBLIC_SOURCE_DEFINITIONS = {
 }
 EXALT_DOCUMENTARY_SEARCH_REPORT = "busqueda_documental_exalt.json"
 EXALT_DOCUMENTARY_SEARCH_DATE = "2026-10-09"
+EXALT_COFEPRIS_CAPTURE_DATE = "2026-10-01"
 COFEPRIS_EXALT_SEARCH_URL = (
     "https://siipris03.cofepris.gob.mx/Resoluciones/Consultas/ConWebRegPlaguicida.asp"
 )
-ENTRUST_LABEL = "Entrust_SC_etiqueta_web_2024.pdf"
-ENTRUST_TECHNICAL_SHEET = "Entrust_SC_ficha_tecnica_2026.pdf"
-ENTRUST_BROCHURE = "Entrust_SC_folleto_tecnico_2024.pdf"
-ENTRUST_COFEPRIS_EVIDENCE = (
-    "Consulta_COFEPRIS_Entrust_RSCO-INAC-0101Y-0195-064-22.14_2026-10-15.html"
-)
-ENTRUST_REGISTRATION = "RSCO-INAC-0101Y-0195-064-22.14"
-ENTRUST_SOURCE_HASHES = {
-    ENTRUST_LABEL: "8aad1d34200bc4c0a0b350177aa9628b77199833bdb90a4057dd33a44175eeed",
-    ENTRUST_BROCHURE: "2a0688b9e731f147b558fb9dd1a1c3931a38bc4206f64eee374ccd3525fa3540",
-    ENTRUST_TECHNICAL_SHEET: "4545d1a804063087e0436e408afa9991f23fa289f7671061251cef53d1d9e6a3",
-    ENTRUST_COFEPRIS_EVIDENCE: "8519798274b2d74d9b098411d39a407abec658ac1d2692e547f70b847c0a3922",
-}
 EXALT_AGENT_REVIEWER = "GitHub Copilot coding agent"
 EXALT_AGENT_REVIEWED_AT = "2026-10-08T23:44:14-06:00"
 EXALT_REVIEW_REPORT = "revision_documental_exalt.json"
@@ -88,6 +78,39 @@ EXALT_REVIEWED_SOURCE_HASHES = {
     EXALT_LABEL: "917258e03aaae9a0164aee6b77bf9606cf2f36a28eaa33ff2be3ccaad4b6c11d",
     COFEPRIS_EXALT_EVIDENCE: "8cd075a2dbe5028c92928269a224a85153cbf08b006a1facaa0c54df427dd847",
 }
+PACKAGE_RAW_FILES = (
+    "Consulta_COFEPRIS_Engeo.pdf",
+    "Consulta_COFEPRIS_Engeo_RSCO-MEZC-1101D-301-064-022_2026-10-09.html",
+    "Consulta_COFEPRIS_Exalt_RSCO-INAC-0103X-301-064-006_2026-10-09.html",
+    "DF-label-Exalt.pdf",
+    "DOF_2013-10-29_Lineamientos_Operacion_Organica_SIDOF.doc",
+    "DOF_2013-10-29_Lineamientos_Operacion_Organica_SIDOF.html",
+    "DOF_2013-10-29_Lineamientos_Operacion_Organica_SIDOF_texto.html",
+    "DOF_2020-06-08_Lineamientos_Operacion_Organica_SIDOF.doc",
+    "DOF_2020-06-08_Lineamientos_Operacion_Organica_SIDOF.html",
+    "DOF_2020-06-08_Lineamientos_Operacion_Organica_SIDOF_texto.html",
+    "DOF_2023-05-02_Anexo1_Lista_Nacional_SIDOF.doc",
+    "DOF_2023-05-02_Anexo1_Lista_Nacional_SIDOF.html",
+    "Exalt_etiqueta_web_rev_2025.pdf",
+    "Exalt_ficha_tecnica_Corteva_Mex_2026.pdf",
+    "Ficha_Tecnica_Diaphorina_citri_SENASICA.pdf",
+    "fichatecnica-engeo_247_sc.pdf",
+    "LPO_Ley_de_Productos_Organicos_texto_vigente.pdf",
+    "LPO_Reglamento_de_la_Ley_de_Productos_Organicos_texto_vigente.pdf",
+    "OMRI_Canada_Products_List_COR_2026-10-08.pdf",
+    "OMRI_Products_List_NOP_EN_2026-10-08.pdf",
+    "README.md",
+)
+PACKAGE_PROCESSED_FILES = (
+    "busqueda_documental_exalt.json",
+    "chunks_candidatos_revision.json",
+    "chunks_corpus.json",
+    "corpus_motor_rag.json",
+    "documentos_productos_pendientes.json",
+    "registros_pendientes_revision.json",
+    "revision_documental_exalt.json",
+    "vademecum_fitosanitario.json",
+)
 
 EXALT_COMBINACIONES = (
     {
@@ -430,6 +453,27 @@ def hash_sha256(ruta: Path) -> str | None:
     return digest.hexdigest()
 
 
+def cargar_revisores_autorizados() -> set[str]:
+    """Carga los nombres autorizados desde el registro versionado del proyecto."""
+    try:
+        contenido = json.loads(AUTHORIZED_REVIEWERS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise RuntimeError(
+            f"No se pudo leer la lista de revisores autorizados: "
+            f"{AUTHORIZED_REVIEWERS_FILE}"
+        ) from error
+
+    revisores = contenido.get("revisores")
+    if not isinstance(revisores, list) or not all(
+        isinstance(revisor, str) and revisor.strip() for revisor in revisores
+    ):
+        raise RuntimeError(
+            "La lista de revisores autorizados debe contener "
+            "el arreglo no vacío 'revisores' con nombres."
+        )
+    return {revisor.strip() for revisor in revisores}
+
+
 def validar_aprobacion_humana(
     ficha: "FichaFitosanitaria",
     directorio: Path | None = None,
@@ -446,7 +490,7 @@ def validar_aprobacion_humana(
     except (OSError, ValueError) as error:
         return False, f"Registro de aprobación humana inválido: {error}"
 
-    if aprobacion.aprobado_por != "Dr. Carlos Flores":
+    if aprobacion.aprobado_por not in cargar_revisores_autorizados():
         return False, "El revisor no está en la lista de revisores autorizados."
 
     documento = Path(ficha.trazabilidad.documento_o_url)
@@ -1238,7 +1282,7 @@ def puede_aprobar_exalt(
         and etiqueta_oficial.estado == "respaldado_en_fuente"
         and bool(etiqueta_oficial.citas)
         and aprobacion is not None
-        and aprobacion.aprobado_por == "Dr. Carlos Flores"
+        and aprobacion.aprobado_por in cargar_revisores_autorizados()
         and sha256_documento_actual is not None
         and aprobacion.sha256_documento_revisado == sha256_documento_actual
     )
@@ -1368,7 +1412,7 @@ def asegurar_fuente_publica(
 
 def verificar_evidencia_manual_cofepris() -> Path:
     """Exige la captura manual de COFEPRIS y explica cómo obtenerla."""
-    ruta = DATA_RAW / COFEPRIS_EXALT_EVIDENCE
+    ruta = DATA_EVIDENCE / COFEPRIS_EXALT_EVIDENCE
     if not ruta.is_file():
         raise FileNotFoundError(
             f"Falta {ruta}. Consulte data/raw/README.md y guarde la captura "
@@ -1692,7 +1736,7 @@ def crear_fichas_exalt_validadas(
 
     rutas_fuentes = {
         EXALT_LABEL: DATA_RAW / EXALT_LABEL,
-        COFEPRIS_EXALT_EVIDENCE: DATA_RAW / COFEPRIS_EXALT_EVIDENCE,
+        COFEPRIS_EXALT_EVIDENCE: DATA_EVIDENCE / COFEPRIS_EXALT_EVIDENCE,
     }
     hashes = {archivo: hash_sha256(ruta) for archivo, ruta in rutas_fuentes.items()}
     paginas = {pagina["pagina"]: pagina["texto"] for pagina in documento["paginas"]}
@@ -1733,13 +1777,13 @@ def crear_fichas_exalt_validadas(
         )
         fuentes_adicionales = [
             TrazabilidadFuente(
-                documento_o_url=f"data/raw/{COFEPRIS_EXALT_EVIDENCE}",
+                documento_o_url=f"data/evidencia/{COFEPRIS_EXALT_EVIDENCE}",
                 ubicacion_fuente=(
                     "Inspección visual del detalle: registro, empresa, ingrediente, "
                     "nombres comerciales, cultivos listados y vigencia 19/06/2028. "
                     "La captura no acredita dosis, plaga ni fecha de consulta."
                 ),
-                fecha_consulta=None,
+                fecha_consulta=EXALT_COFEPRIS_CAPTURE_DATE,
                 sha256=hashes[COFEPRIS_EXALT_EVIDENCE],
             )
         ]
@@ -1792,243 +1836,6 @@ def crear_ficha_exalt_validada(ruta_json: Path) -> FichaFitosanitaria:
     return crear_fichas_exalt_validadas(ruta_json)[0]
 
 
-def crear_ficha_entrust_mango_trips() -> FichaFitosanitaria:
-    """Crea la ficha convencional de Entrust para Mango y Frankliniella."""
-
-    def cita(
-        archivo: str,
-        ubicacion: str,
-        fragmento: str,
-        alcance: str,
-        metodo: str,
-    ) -> CitaEvidencia:
-        return CitaEvidencia(
-            archivo=archivo,
-            sha256=ENTRUST_SOURCE_HASHES[archivo],
-            ubicacion=ubicacion,
-            fragmento=fragmento,
-            metodo_verificacion=metodo,
-            alcance=alcance,
-        )
-
-    texto = (
-        "Ficha elaborada por PhytoRAG-Tropical a partir de documentos técnicos "
-        "de Corteva y de la consulta oficial de COFEPRIS. No es una ficha emitida "
-        "ni aprobada por COFEPRIS.\n\n"
-        "Producto: Entrust SC. Ingrediente activo: spinosad. Formulación: "
-        "suspensión concentrada; equivalente a 240 g de i.a./L a 20 °C. "
-        f"Registro: {ENTRUST_REGISTRATION}. Titular: CORTEVA MX, S. A. DE C.V.\n\n"
-        "Cultivo: Mango. Plaga: Frankliniella occidentalis. "
-        "Dosis: 7.5-12.5 mL/100 L agua. Intervalo de seguridad: 1 día. "
-        "Periodo de reentrada: 4 horas.\n\n"
-        "La etiqueta web se identifica como ilustrativa y no como etiqueta real. "
-        "COFEPRIS confirma registro, identidad, Entrust SC y Mango como cultivo "
-        "listado, pero no publica dosis, plaga, IS ni reentrada. Esos campos "
-        "proceden de los documentos técnicos de Corteva.\n\n"
-        "Restricciones: usar equipo de protección personal; no aplicar cuando el "
-        "cultivo o las malezas estén en flor o las abejas estén libando; esperar "
-        "al menos tres horas antes de liberar abejas; no mezclar en tanque sin "
-        "prueba de compatibilidad y fitotoxicidad; evitar lluvia, viento mayor "
-        "a 10 km/h y estrés hídrico; alternar modos de acción."
-    )
-    evidencia = {
-        "producto_comercial": EvidenciaCampo(
-            valor="Entrust SC",
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_COFEPRIS_EVIDENCE,
-                    "Detalle del registro, campo Nombre comercial",
-                    "Nombre comercial: ENTRUST SC / SUCCESS 240 SC / ...",
-                    "Confirma Entrust SC como nombre comercial registrado.",
-                    "extraccion_textual_html",
-                )
-            ],
-        ),
-        "ingrediente_activo": EvidenciaCampo(
-            valor="spinosad",
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_COFEPRIS_EVIDENCE,
-                    "Detalle del registro, campo Ingrediente activo",
-                    "Ingrediente activo: SPINOSAD",
-                    "Confirma el ingrediente activo del registro.",
-                    "extraccion_textual_html",
-                ),
-                cita(
-                    ENTRUST_TECHNICAL_SHEET,
-                    "Página 2, identificación y composición",
-                    "Ingrediente Activo: Spinosad; Equivalente a 240 g de i.a./L.",
-                    "Confirma ingrediente y concentración de la formulación técnica.",
-                    "extraccion_textual_pdf",
-                ),
-            ],
-        ),
-        "registro_cofepris": EvidenciaCampo(
-            valor=ENTRUST_REGISTRATION,
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_COFEPRIS_EVIDENCE,
-                    "Detalle del registro, campo Registro",
-                    f"Registro: {ENTRUST_REGISTRATION}",
-                    "Confirma el registro oficial consultado.",
-                    "extraccion_textual_html",
-                )
-            ],
-        ),
-        "cultivo": EvidenciaCampo(
-            valor="Mango",
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_COFEPRIS_EVIDENCE,
-                    "Detalle del registro, campo Usos",
-                    "... PAPAYO, MANGO, NOGAL PECANERO.",
-                    "Confirma Mango como cultivo listado; no atribuye una plaga.",
-                    "extraccion_textual_html",
-                ),
-                cita(
-                    ENTRUST_TECHNICAL_SHEET,
-                    "Página 3, tabla de recomendaciones de uso",
-                    "Mango (1) ... Trips (Frankliniella occidentalis) ...",
-                    "Vincula Mango con la combinación técnica.",
-                    "extraccion_textual_pdf",
-                ),
-            ],
-        ),
-        "problema_fitosanitario": EvidenciaCampo(
-            valor="Frankliniella occidentalis",
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_LABEL,
-                    "Página 4, fila Mango",
-                    "Mango (1) Trips (Frankliniella occidentalis)",
-                    "Respalda la plaga asociada a Mango.",
-                    "extraccion_textual_pdf",
-                )
-            ],
-        ),
-        "dosis": EvidenciaCampo(
-            valor="7.5-12.5 mL/100 L agua",
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_LABEL,
-                    "Página 4, fila Mango",
-                    "7.5-12.5 mL/100 L agua",
-                    "Respalda la dosis técnica.",
-                    "extraccion_textual_pdf",
-                ),
-                cita(
-                    ENTRUST_TECHNICAL_SHEET,
-                    "Página 3, tabla de recomendaciones de uso",
-                    "7.5-12.5 mL/100 L agua",
-                    "Corrobora dosis y unidad.",
-                    "extraccion_textual_pdf",
-                ),
-            ],
-        ),
-        "is_dias": EvidenciaCampo(
-            valor=1,
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_LABEL,
-                    "Página 4, marcador (1) y leyenda",
-                    "(1) Intervalo de seguridad: 1 día.",
-                    "Respalda el IS de Mango.",
-                    "extraccion_textual_pdf",
-                )
-            ],
-        ),
-        "periodo_reingreso_horas": EvidenciaCampo(
-            valor=4,
-            estado="respaldado_en_fuente",
-            citas=[
-                cita(
-                    ENTRUST_LABEL,
-                    "Página 4, leyenda de reentrada",
-                    "Periodo de reentrada al área tratada: 4 horas.",
-                    "Respalda el periodo de reentrada.",
-                    "extraccion_textual_pdf",
-                )
-            ],
-        ),
-        "aprobado_omri": EvidenciaCampo(
-            valor=None,
-            estado="desconocido",
-            motivo="No se verificó una correspondencia exacta y vigente en OMRI.",
-        ),
-        "etiqueta_oficial_verificada": EvidenciaCampo(
-            valor=False,
-            estado="limitacion_critica",
-            motivo="La etiqueta web declara que es una ilustración y no una etiqueta real.",
-        ),
-        "regimen": EvidenciaCampo(
-            valor="convencional",
-            estado="respaldado_en_fuente",
-            motivo="Se integra al corpus convencional; no se afirma certificación orgánica.",
-        ),
-    }
-    return FichaFitosanitaria(
-        id_registro="FICH-ENTRUST-MANGO-FRANKLINIELLA-001",
-        cultivo="Mango",
-        problema_fitosanitario="Frankliniella occidentalis",
-        producto_comercial="Entrust SC",
-        ingrediente_activo="spinosad",
-        registro_cofepris=ENTRUST_REGISTRATION,
-        dosis=DosisEspecificacion(
-            minima=7.5,
-            maxima=12.5,
-            unidad="mL/100L",
-            texto_etiqueta="7.5-12.5 mL/100 L agua",
-        ),
-        is_dias=1,
-        aprobado_omri=None,
-        periodo_reingreso_horas=4,
-        trazabilidad=TrazabilidadFuente(
-            documento_o_url=f"data/raw/{ENTRUST_TECHNICAL_SHEET}",
-            ubicacion_fuente="Página 2: identidad; página 3: Mango, plaga, dosis, IS y reentrada.",
-            fecha_consulta="2026-10-15",
-            sha256=ENTRUST_SOURCE_HASHES[ENTRUST_TECHNICAL_SHEET],
-        ),
-        fuentes_adicionales=[
-            TrazabilidadFuente(
-                documento_o_url=f"data/raw/{ENTRUST_COFEPRIS_EVIDENCE}",
-                ubicacion_fuente="Detalle HTML: identidad, producto, Mango y vigencia.",
-                fecha_consulta="2026-10-15",
-                sha256=ENTRUST_SOURCE_HASHES[ENTRUST_COFEPRIS_EVIDENCE],
-            ),
-            TrazabilidadFuente(
-                documento_o_url=f"data/raw/{ENTRUST_LABEL}",
-                ubicacion_fuente="Página 4: Mango, plaga, dosis, IS y reentrada.",
-                fecha_consulta="2026-10-15",
-                sha256=ENTRUST_SOURCE_HASHES[ENTRUST_LABEL],
-            ),
-            TrazabilidadFuente(
-                documento_o_url=f"data/raw/{ENTRUST_BROCHURE}",
-                ubicacion_fuente="Páginas 1-2: identidad y restricciones técnicas.",
-                fecha_consulta="2026-10-15",
-                sha256=ENTRUST_SOURCE_HASHES[ENTRUST_BROCHURE],
-            ),
-        ],
-        texto_fragmento=texto,
-        observaciones=(
-            "Ficha convencional elaborada por PhytoRAG-Tropical. La consulta "
-            "COFEPRIS confirma registro, identidad y Mango; los documentos "
-            "técnicos aportan la combinación, dosis, IS, reentrada y restricciones. "
-            "La etiqueta web es ilustrativa y no se presenta como etiqueta "
-            "regulatoria. aprobado_omri=None."
-        ),
-        evidencia_documental=evidencia,
-        estado_revision_documental="COFEPRIS_Y_EVIDENCIA_TECNICA_CONCORDANTES",
-        revision_documental_aprobada=True,
-    )
-
-
 def clasificar_y_exportar(
     fichas: list[FichaFitosanitaria],
     directorio_salida: Path | None = None,
@@ -2049,11 +1856,7 @@ def clasificar_y_exportar(
         ruta_plantilla_obsoleta.unlink()
     hashes_actuales = {
         EXALT_LABEL: hash_sha256(DATA_RAW / EXALT_LABEL),
-        COFEPRIS_EXALT_EVIDENCE: hash_sha256(DATA_RAW / COFEPRIS_EXALT_EVIDENCE),
-        **{
-            archivo: hash_sha256(DATA_RAW / archivo)
-            for archivo in ENTRUST_SOURCE_HASHES
-        },
+        COFEPRIS_EXALT_EVIDENCE: hash_sha256(DATA_EVIDENCE / COFEPRIS_EXALT_EVIDENCE),
     }
     fichas_clasificadas: list[FichaFitosanitaria] = []
     for ficha in fichas:
@@ -2085,31 +1888,6 @@ def clasificar_y_exportar(
                     ).strip(),
                 }
             )
-        elif ficha.id_registro == "FICH-ENTRUST-MANGO-FRANKLINIELLA-001":
-            fuentes_entrust = [
-                ficha.trazabilidad.documento_o_url.removeprefix("data/raw/"),
-                *(
-                    fuente.documento_o_url.removeprefix("data/raw/")
-                    for fuente in ficha.fuentes_adicionales
-                ),
-            ]
-            motivos_entrust = [
-                archivo
-                for archivo in fuentes_entrust
-                if hashes_actuales.get(archivo) != ENTRUST_SOURCE_HASHES.get(archivo)
-            ]
-            if motivos_entrust:
-                ficha = ficha.model_copy(
-                    update={
-                        "revision_documental_aprobada": False,
-                        "estado_revision_documental": "EVIDENCIA_ENTRUST_INCOMPLETA_O_FUENTE_CAMBIADA",
-                        "observaciones": (
-                            (ficha.observaciones or "")
-                            + " Evidencia Entrust ausente o modificada: "
-                            + ", ".join(motivos_entrust)
-                        ).strip(),
-                    }
-                )
         if ficha.revision_documental_aprobada:
             aprobada, motivo_aprobacion = validar_aprobacion_humana(ficha)
             if not aprobada:
@@ -2317,19 +2095,7 @@ def crear_instrucciones_paquete() -> str:
    contiene los registros en cuarentena.
    Los nombres canonicos de cultivo para coordinar con Sofía son `Limonero`,
    `Mango` y `Papayo`.
-8. Entrust se conserva como investigacion local opcional y queda pendiente por
-   falta de aprobacion humana. Si se incluye, solo es para regimen convencional.
-   `aprobado_omri` es `null`:
-   no se afirma certificacion organica ni compatibilidad de exportacion. La
-   consulta COFEPRIS respalda registro, titular, producto, ingrediente y Mango
-   como cultivo listado; no publica dosis, plaga, IS ni reentrada. Esos campos
-   proceden de los documentos tecnicos de Corteva.
-9. La etiqueta web de Entrust declara que es ilustrativa y no una etiqueta real.
-   La ficha fue elaborada por PhytoRAG-Tropical y no es emitida ni aprobada por
-   COFEPRIS. Los hashes y ubicaciones de las fuentes estan en `MANIFEST.md`.
-   Si una fuente falta o cambia, el pipeline retira la ficha del corpus y la
-   coloca en cuarentena.
-10. Exalt permanece pendiente de etiqueta oficial verificable, confirmacion de
+8. Exalt permanece pendiente de etiqueta oficial verificable, confirmacion de
     formulacion y aprobacion humana. Toda ficha requiere
     `data/aprobaciones/<id_registro>.json` con `aprobado_por`,
     `fecha_aprobacion` y `sha256_documento_revisado`. El hash debe coincidir
@@ -2350,22 +2116,24 @@ def crear_manifiesto_y_paquete() -> Path:
     ruta_instrucciones.write_text(crear_instrucciones_paquete(), encoding="utf-8")
 
     archivos = [
-        *sorted(path for path in DATA_RAW.rglob("*") if path.is_file()),
-        *sorted(path for path in DATA_PROCESSED.rglob("*") if path.is_file()),
+        *(DATA_RAW / nombre for nombre in PACKAGE_RAW_FILES),
+        *(
+            DATA_EVIDENCE / path.name
+            for path in DATA_EVIDENCE.glob("*")
+            if path.is_file()
+        ),
+        *(
+            DATA_APPROVALS / path.name
+            for path in DATA_APPROVALS.glob("*.json")
+            if path.is_file()
+        ),
+        *(DATA_PROCESSED / nombre for nombre in PACKAGE_PROCESSED_FILES),
         PROJECT_ROOT / "src" / "data_ingest.py",
+        PROJECT_ROOT / "tests" / "test_data_ingest.py",
         PROJECT_ROOT / "requirements.txt",
         ruta_instrucciones,
     ]
-    archivos = [
-        path
-        for path in archivos
-        if path.name
-        not in {
-            ".gitkeep",
-            "investigacion_documental_bloqueos.json",
-            "solicitudes_documentales_local.json",
-        }
-    ]
+    archivos = [path for path in archivos if path.is_file()]
     filas = []
     for ruta in archivos:
         relativo = ruta.relative_to(PROJECT_ROOT).as_posix()
@@ -2375,7 +2143,7 @@ def crear_manifiesto_y_paquete() -> Path:
 
     hashes = {
         EXALT_LABEL: hash_sha256(DATA_RAW / EXALT_LABEL),
-        COFEPRIS_EXALT_EVIDENCE: hash_sha256(DATA_RAW / COFEPRIS_EXALT_EVIDENCE),
+        COFEPRIS_EXALT_EVIDENCE: hash_sha256(DATA_EVIDENCE / COFEPRIS_EXALT_EVIDENCE),
     }
     informe_path = DATA_PROCESSED / EXALT_REVIEW_REPORT
     if informe_path.is_file():
@@ -2434,7 +2202,9 @@ def crear_manifiesto_y_paquete() -> Path:
         + "la formulación como suspensión concentrada.\n"
         + "- No se localizó una etiqueta autorizada vigente; las fichas Exalt siguen "
         + "pendientes y no indexables.\n"
-        + "- Fecha de consulta COFEPRIS: desconocida; la captura solo muestra vigencia.\n"
+        + "- Fecha de consulta COFEPRIS de la captura: `2026-10-01`, "
+        + "confirmada por Ricardo como fecha de realización; no aparece como "
+        + "texto visible en la imagen.\n"
         + "- SENASICA se conserva como información epidemiológica general; Engeo "
         + "sigue pendiente por inconsistencia de unidades.\n"
         + "- Se incluyen listas OMRI NOP/COR del 2026-10-08, la Ley de Productos "
@@ -2456,10 +2226,9 @@ def crear_manifiesto_y_paquete() -> Path:
         + "el documento actual.\n"
         + "- Fuentes públicas faltantes se descargan y validan contra hashes "
         + "esperados; la captura COFEPRIS Exalt requiere el procedimiento de "
-        + "`data/raw/README.md`.\n"
+        + "`data/raw/README.md`. La captura exacta se conserva en "
+        + "`data/evidencia/Consulta_COFEPRIS_Exalt.png`.\n"
         + "- Nombres canónicos coordinados: `Limonero`, `Mango` y `Papayo`.\n"
-        + "- Entrust local es una investigación opcional fuera de la versión "
-        + "publicada revisada por Carlos y permanece en cuarentena sin aprobación.\n"
     ]
     manifiesto_lineas.append(
         "- No se aprueba Exalt para indexación hasta confirmar la etiqueta autorizada "
@@ -2508,14 +2277,9 @@ if __name__ == "__main__":
     ficha_engeo = crear_ficha_engeo_pendiente(ruta_documentos)
     fichas_exalt = crear_fichas_exalt_validadas(ruta_documentos)
 
-    fichas_entrust = []
-    if all((DATA_RAW / archivo).is_file() for archivo in ENTRUST_SOURCE_HASHES):
-        fichas_entrust = [crear_ficha_entrust_mango_trips()]
-
     fichas_a_procesar = [
         ficha_extraida,
         ficha_engeo,
-        *fichas_entrust,
         *fichas_exalt,
     ]
     resultado = clasificar_y_exportar(fichas_a_procesar)

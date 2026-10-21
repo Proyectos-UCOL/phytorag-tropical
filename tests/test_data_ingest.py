@@ -1,6 +1,5 @@
 """Pruebas de evidencia documental asistida y chunks separados para Issue #1."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,17 +11,16 @@ from src.data_ingest import (
     EXALT_CORTEVA_TECHNICAL_SHEET_SHA256,
     EXALT_LABEL,
     EXALT_REVIEWED_SOURCE_HASHES,
+    CitaEvidencia,
     DosisEspecificacion,
     EvidenciaCampo,
     FichaFitosanitaria,
     RegistroAprobacionHumana,
     TrazabilidadFuente,
     asegurar_fuente_publica,
-    clasificar_y_exportar,
     construir_evidencia_campos_exalt,
     construir_informe_busqueda_documental_exalt,
     construir_texto_exalt,
-    crear_ficha_entrust_mango_trips,
     hash_sha256,
     puede_aprobar_exalt,
     serializar_ficha_motor_rag,
@@ -278,7 +276,16 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
             "etiqueta_oficial_verificada": EvidenciaCampo(
                 valor=True,
                 estado="respaldado_en_fuente",
-                citas=[],
+                citas=[
+                    CitaEvidencia(
+                        archivo=EXALT_LABEL,
+                        sha256=self.hashes[EXALT_LABEL],
+                        ubicacion="Página 1",
+                        fragmento="Documento ficticio de prueba",
+                        metodo_verificacion="extraccion_textual_pdf",
+                        alcance="Cita válida únicamente para probar la exigencia de aprobación.",
+                    )
+                ],
             )
         }
         self.assertFalse(
@@ -290,9 +297,59 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
             )
         )
 
+    def test_aprobacion_humana_valida_con_cita_y_hash_correctos(self) -> None:
+        evidencia = {
+            "etiqueta_oficial_verificada": EvidenciaCampo(
+                valor=True,
+                estado="respaldado_en_fuente",
+                citas=[
+                    CitaEvidencia(
+                        archivo=EXALT_LABEL,
+                        sha256=self.hashes[EXALT_LABEL],
+                        ubicacion="Página 1",
+                        fragmento="Documento ficticio de prueba",
+                        metodo_verificacion="extraccion_textual_pdf",
+                        alcance="Cita válida para la prueba positiva.",
+                    )
+                ],
+            )
+        }
+        aprobacion = RegistroAprobacionHumana(
+            aprobado_por="Dr. Carlos Flores",
+            fecha_aprobacion="2026-10-19",
+            sha256_documento_revisado="a" * 64,
+        )
+        self.assertTrue(
+            puede_aprobar_exalt(
+                evidencia,
+                True,
+                aprobacion=aprobacion,
+                sha256_documento_actual="a" * 64,
+            )
+        )
+
     def test_aprobacion_humana_con_hash_incorrecto_se_invalida(self) -> None:
-        ficha = crear_ficha_entrust_mango_trips()
         with tempfile.TemporaryDirectory() as directorio:
+            documento = Path(directorio) / "documento-ficticio.pdf"
+            documento.write_bytes(b"documento de prueba")
+            ficha = FichaFitosanitaria(
+                id_registro="FICH-TEST-HASH-001",
+                cultivo="Limonero",
+                problema_fitosanitario="Diaphorina citri",
+                ingrediente_activo="spinetoram",
+                registro_cofepris="RSCO-TEST",
+                dosis=DosisEspecificacion(
+                    minima=400,
+                    maxima=600,
+                    unidad="mL/ha",
+                    texto_etiqueta="400 - 600",
+                ),
+                trazabilidad=TrazabilidadFuente(
+                    documento_o_url=str(documento),
+                    ubicacion_fuente="Documento ficticio de prueba",
+                    sha256=hash_sha256(documento),
+                ),
+            )
             ruta = Path(directorio) / f"{ficha.id_registro}.json"
             ruta.write_text(
                 RegistroAprobacionHumana(
@@ -307,6 +364,42 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
         self.assertFalse(valida)
         self.assertIn("no coincide", motivo)
 
+    def test_revisor_no_autorizado_se_rechaza(self) -> None:
+        with tempfile.TemporaryDirectory() as directorio:
+            documento = Path(directorio) / "documento-ficticio.pdf"
+            documento.write_bytes(b"documento de prueba")
+            ficha = FichaFitosanitaria(
+                id_registro="FICH-TEST-REVISOR-001",
+                cultivo="Limonero",
+                problema_fitosanitario="Diaphorina citri",
+                ingrediente_activo="spinetoram",
+                registro_cofepris="RSCO-TEST",
+                dosis=DosisEspecificacion(
+                    minima=400,
+                    maxima=600,
+                    unidad="mL/ha",
+                    texto_etiqueta="400 - 600",
+                ),
+                trazabilidad=TrazabilidadFuente(
+                    documento_o_url=str(documento),
+                    ubicacion_fuente="Documento ficticio de prueba",
+                    sha256=hash_sha256(documento),
+                ),
+            )
+            ruta = Path(directorio) / f"{ficha.id_registro}.json"
+            ruta.write_text(
+                RegistroAprobacionHumana(
+                    aprobado_por="Revisor no autorizado",
+                    fecha_aprobacion="2026-10-19",
+                    sha256_documento_revisado=hash_sha256(documento),
+                ).model_dump_json(),
+                encoding="utf-8",
+            )
+            valida, motivo = validar_aprobacion_humana(ficha, Path(directorio))
+
+        self.assertFalse(valida)
+        self.assertIn("no está en la lista", motivo)
+
     def test_fuente_publica_existente_con_hash_distinto_se_detiene(self) -> None:
         with tempfile.TemporaryDirectory() as directorio:
             ruta = Path(directorio) / "fuente.pdf"
@@ -320,65 +413,6 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
                     "https://example.invalid/fuente.pdf",
                     "0" * 64,
                 )
-
-    def test_entrust_mango_sin_aprobacion_humana_queda_pendiente(self) -> None:
-        ficha = crear_ficha_entrust_mango_trips()
-
-        self.assertTrue(ficha.revision_documental_aprobada)
-        self.assertEqual(ficha.cultivo, "Mango")
-        self.assertEqual(ficha.problema_fitosanitario, "Frankliniella occidentalis")
-        self.assertEqual(ficha.dosis.unidad, "mL/100L")
-        self.assertEqual(ficha.dosis.texto_etiqueta, "7.5-12.5 mL/100 L agua")
-        self.assertEqual(ficha.is_dias, 1)
-        self.assertEqual(ficha.periodo_reingreso_horas, 4)
-        self.assertIsNone(ficha.aprobado_omri)
-        self.assertEqual(ficha.evidencia_documental["regimen"].valor, "convencional")
-        self.assertFalse(
-            ficha.evidencia_documental["etiqueta_oficial_verificada"].valor
-        )
-
-        with tempfile.TemporaryDirectory() as directorio:
-            resultado = clasificar_y_exportar([ficha], Path(directorio))
-            corpus = json.loads(
-                Path(resultado["ruta_motor_rag"]).read_text(encoding="utf-8")
-            )
-            pendientes = json.loads(
-                Path(resultado["ruta_pendientes"]).read_text(encoding="utf-8")
-            )
-
-        self.assertEqual(corpus, [])
-        self.assertEqual(len(pendientes), 1)
-
-    def test_entrust_sale_del_corpus_si_falta_una_fuente(self) -> None:
-        ficha = crear_ficha_entrust_mango_trips()
-        hash_real = hash_sha256
-
-        def hash_con_falta(ruta: Path) -> str | None:
-            if ruta.name == "Entrust_SC_ficha_tecnica_2026.pdf":
-                return None
-            return hash_real(ruta)
-
-        with (
-            tempfile.TemporaryDirectory() as directorio,
-            patch("src.data_ingest.hash_sha256", side_effect=hash_con_falta),
-        ):
-            resultado = clasificar_y_exportar([ficha], Path(directorio))
-            corpus = json.loads(
-                Path(resultado["ruta_motor_rag"]).read_text(encoding="utf-8")
-            )
-            pendientes = json.loads(
-                Path(resultado["ruta_pendientes"]).read_text(encoding="utf-8")
-            )
-
-        self.assertEqual(corpus, [])
-        self.assertEqual(len(pendientes), 1)
-        self.assertEqual(
-            pendientes[0]["estado"],
-            "PENDIENTE_REVISION",
-        )
-        self.assertIn(
-            "Entrust_SC_ficha_tecnica_2026.pdf", pendientes[0]["motivo_cuarentena"]
-        )
 
     def test_ficha_tecnica_corrobora_datos_sin_aprobar_etiqueta_ni_formulacion(
         self,
