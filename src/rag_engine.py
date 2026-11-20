@@ -1,5 +1,5 @@
-"""
-PhytoRAG-Tropical: Motor de Recuperación y Generación Aumentada (RAG Híbrido)
+"""PhytoRAG-Tropical: Motor de Recuperación y Generación Aumentada (RAG Híbrido).
+
 Responsable: Alumno 2 (RAG Architecture Lead) — Sofía (@SOFIARENASM)
 Director: Dr. Carlos Flores | Facultad de Telemática — Universidad de Colima
 """
@@ -21,117 +21,42 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 VECTOR_STORE_DIR = PROJECT_ROOT / "data" / "vector_store"
+CORPUS_OFICIAL_FILE = DATA_PROCESSED / "corpus_motor_rag.json"
 
-# Fichas técnicas oficiales semilla (Trazabilidad canónica para desarrollo Milestone 1)
-# NOTA DE AUDITORÍA CIENTÍFICA:
-# Las dosis agronómicas, ingredientes activos y tolerancias provienen del Diccionario de Especialidades Agroquímicas
-# (DEAQ México), fichas técnicas de fabricantes registrados y lineamientos SENASICA/OMRI.
-# Los códigos RSCO-... representan la sintaxis formal de COFEPRIS y se integrarán de forma 100% automatizada
-# con el volcado CSV de datos abiertos de COFEPRIS/SENASICA que desarrolla el Alumno 1 en `src/data_ingest.py`.
-FICHAS_OFICIALES_SEMILLA = [
-    {
-        "id": "COFEPRIS-001",
-        "producto_comercial": "Oxicloruro de Cobre 50% PH",
-        "ingrediente_activo": "Oxicloruro de Cobre",
-        "registro_sanitario_cofepris": "RSCO-FUNG-0301-301-002-050",
-        "cultivo": "Limón",
-        "problema_fitosanitario": "Cancro bacteriano (Xanthomonas citri) y Roña (Elsinoë fawcettii)",
-        "dosis_autorizada": "2.0 a 3.0 kg/ha (o 250 a 350 g/100 L de agua)",
-        "intervalo_seguridad_dias": 0,
-        "aprobado_omri": True,
-        "compatible_exportacion_usda": True,
-        "recomendacion_agronomica": "Realizar aplicaciones foliares preventivas al inicio de los brotes vegetativos y floración. Asegurar cobertura completa del follaje.",
-        "fragmento_oficial_citado": "Autorizado en cítricos y limonero para control de Cancro Bacteriano (Xanthomonas citri) a dosis de 2.0-3.0 kg/ha. Intervalo de seguridad: Sin límite (0 días). Insumo cúprico con certificación orgánica OMRI permitida con restricciones de acumulación de cobre en suelo.",
-        "fuente_documental": "Catálogo Oficial de Plaguicidas COFEPRIS / DEAQ México / Lista OMRI",
-        "estado_verificacion": "canonica_deaq_omri",
-        "trazabilidad_fuente": "Dosis y plaga verificadas en DEAQ México; exención de tolerancia USDA bajo 40 CFR 180.1021; listado OMRI Generic Materials. Código RSCO estructurado según sintaxis formal COFEPRIS para validación previa a la ingesta del Alumno 1.",
-    },
-    {
-        "id": "COFEPRIS-002",
-        "producto_comercial": "Azufre Elemental 80% WG",
-        "ingrediente_activo": "Azufre Elemental",
-        "registro_sanitario_cofepris": "RSCO-FUNG-0319-301-002-080",
-        "cultivo": "Mango",
-        "problema_fitosanitario": "Cenicilla (Oidium mangiferae) y Ácaro blanco (Polyphagotarsonemus latus)",
-        "dosis_autorizada": "3.0 a 5.0 kg/ha (o 300 a 500 g/100 L de agua)",
-        "intervalo_seguridad_dias": 0,
-        "aprobado_omri": True,
-        "compatible_exportacion_usda": True,
-        "recomendacion_agronomica": "Aplicar al detectar las primeras inflorescencias o ante condiciones ambientales de alta humedad y temperatura templada. Evitar aplicar con temperaturas mayores a 32°C para evitar fitotoxicidad.",
-        "fragmento_oficial_citado": "Fungicida y acaricida de contacto. Autorizado para cultivo de Mango contra Cenicilla del mango (Oidium mangiferae) a dosis de 3-5 kg/ha. Intervalo de seguridad: 0 días. Listado OMRI para producción orgánica.",
-        "fuente_documental": "Catálogo Oficial de Plaguicidas COFEPRIS / DEAQ México / Lista OMRI",
-        "estado_verificacion": "canonica_deaq_omri",
-        "trazabilidad_fuente": "Dosis y patógeno verificados en DEAQ México; exención de residuo EPA 40 CFR 180.1236; listado OMRI permitido sin restricciones para fungicidas.",
-    },
-    {
-        "id": "COFEPRIS-003",
-        "producto_comercial": "Bacillus thuringiensis subsp. kurstaki (32,000 UI/mg)",
-        "ingrediente_activo": "Bacillus thuringiensis",
-        "registro_sanitario_cofepris": "RSCO-INAC-0101-301-002-032",
-        "cultivo": "Papaya",
-        "problema_fitosanitario": "Gusano barrenador del fruto y Gusano cogollero (Spodoptera frugiperda)",
-        "dosis_autorizada": "0.5 a 1.0 kg/ha",
-        "intervalo_seguridad_dias": 0,
-        "aprobado_omri": True,
-        "compatible_exportacion_usda": True,
-        "recomendacion_agronomica": "Aplicar durante las primeras fases larvarias (L1 y L2). Realizar aplicaciones en horas de baja radiación solar (tarde o noche) para evitar la degradación UV del cristal proteico.",
-        "fragmento_oficial_citado": "Bioinsecticida microbial. Autorizado en frutales tropicales y papaya contra lepidópteros a dosis de 0.5-1.0 kg/ha. Sin intervalo de seguridad a cosecha (0 días). Certificación OMRI orgánica y exento de tolerancias LMR por EPA/USDA.",
-        "fuente_documental": "Catálogo Oficial SENASICA / DEAQ México / Lista OMRI Insumos Permitidos",
-        "estado_verificacion": "canonica_senasica_omri",
-        "trazabilidad_fuente": "Bioinsumo bacteriano validado por SENASICA; exención federal de tolerancia por EPA (40 CFR 180.1011); certificación orgánica OMRI.",
-    },
-    {
-        "id": "COFEPRIS-004",
-        "producto_comercial": "Azadiractina 1.2% CE (Extracto de Neem)",
-        "ingrediente_activo": "Azadiractina",
-        "registro_sanitario_cofepris": "RSCO-INAC-0102-302-009-001",
-        "cultivo": "Limón",
-        "problema_fitosanitario": "Psílido Asiático de los Cítricos (Diaphorina citri / Vector del HLB) y Trips",
-        "dosis_autorizada": "1.0 a 1.5 L/ha",
-        "intervalo_seguridad_dias": 0,
-        "aprobado_omri": True,
-        "compatible_exportacion_usda": True,
-        "recomendacion_agronomica": "Aplicar en brotaciones vegetativas tiernas cuando se detecten ninfas de Diaphorina citri. Actúa como regulador de crecimiento y repelente alimentario.",
-        "fragmento_oficial_citado": "Insecticida botánico autorizado para cítricos contra Diaphorina citri a dosis de 1.0 a 1.5 L/ha. Intervalo a cosecha: 0 días. Certificación orgánica OMRI y compatible con exportación a EE.UU.",
-        "fuente_documental": "Catálogo Oficial SENASICA / Protocolo de Campaña Fitosanitaria contra HLB",
-        "estado_verificacion": "canonica_senasica_omri",
-        "trazabilidad_fuente": "Protocolo técnico de SENASICA para campaña fitosanitaria contra Huanglongbing (HLB) en cítricos; insumo botánico certificado OMRI.",
-    },
-    {
-        "id": "COFEPRIS-005",
-        "producto_comercial": "Mancozeb 80% PH",
-        "ingrediente_activo": "Mancozeb",
-        "registro_sanitario_cofepris": "RSCO-FUNG-0322-301-002-080",
-        "cultivo": "Papaya",
-        "problema_fitosanitario": "Antracnosis (Colletotrichum gloeosporioides)",
-        "dosis_autorizada": "1.5 a 2.0 kg/ha",
-        "intervalo_seguridad_dias": 14,
-        "aprobado_omri": False,
-        "compatible_exportacion_usda": True,
-        "recomendacion_agronomica": "Uso exclusivo en régimen convencional. Prohibido en huertas orgánicas certificadas OMRI. Respetar estrictamente los 14 días de intervalo de seguridad antes del corte de fruta para cumplir límites máximos de residuos (LMR).",
-        "fragmento_oficial_citado": "Fungicida protectante ditiocarbamato. Autorizado para Papayo contra Antracnosis a dosis de 1.5 a 2.0 kg/ha. Intervalo de seguridad obligatorio: 14 días. NO PERMITIDO en régimen orgánico OMRI/LPO.",
-        "fuente_documental": "Catálogo Oficial de Plaguicidas COFEPRIS / DEAQ México / LMR EPA-USDA",
-        "estado_verificacion": "canonica_convencional_deaq",
-        "trazabilidad_fuente": "Dosis y días a cosecha según DEAQ México para papaya; prohibido bajo normativa orgánica LPO/OMRI; tolerancia EPA establecida en 40 CFR 180.176.",
-    },
-    {
-        "id": "COFEPRIS-006",
-        "producto_comercial": "Imidacloprid 35% SC",
-        "ingrediente_activo": "Imidacloprid",
-        "registro_sanitario_cofepris": "RSCO-INAC-0199-311-064-035",
-        "cultivo": "Mango",
-        "problema_fitosanitario": "Trips (Frankliniella spp.) y Escama blanca",
-        "dosis_autorizada": "0.75 a 1.0 L/ha",
-        "intervalo_seguridad_dias": 30,
-        "aprobado_omri": False,
-        "compatible_exportacion_usda": False,
-        "recomendacion_agronomica": "Uso restringido convencional. Prohibido en orgánico. Advertencia de exportación: monitorear LMR estricto de la Unión Europea y USDA.",
-        "fragmento_oficial_citado": "Insecticida neonicotinoide sistémico. Autorizado para Mango contra Trips a dosis de 0.75-1.0 L/ha. Intervalo de seguridad: 30 días. NO apto para producción orgánica (OMRI No).",
-        "fuente_documental": "Catálogo Oficial de Plaguicidas COFEPRIS / DEAQ México",
-        "estado_verificacion": "canonica_convencional_deaq",
-        "trazabilidad_fuente": "Dosis comercial DEAQ México; prohibición orgánica estricta (OMRI No); incompatible con ciertos programas de exportación por límites estrictos de residuos neonicotinoides.",
-    },
-]
+# Normalización de nombres de cultivos compartida con Alumno 1 (Ricardo: Limonero, Mango, Papayo)
+MAPA_CULTIVOS_CANONICOS: dict[str, str] = {
+    "limon": "limonero",
+    "limón": "limonero",
+    "limonero": "limonero",
+    "citricos": "limonero",
+    "cítricos": "limonero",
+    "mango": "mango",
+    "papaya": "papayo",
+    "papayo": "papayo",
+}
+
+
+def normalizar_cultivo(cultivo: str | None) -> str:
+    """Normaliza el nombre del cultivo al término canónico estándar del corpus."""
+    if not cultivo:
+        return ""
+    c = cultivo.strip().lower().replace("ó", "o")
+    return MAPA_CULTIVOS_CANONICOS.get(c, c)
+
+
+class RecomendacionTratamiento(BaseModel):
+    """Esquema estructurado de salida de la recomendación fitosanitaria."""
+
+    producto_comercial: str
+    ingrediente_activo: str
+    registro_sanitario_cofepris: str
+    dosis_autorizada: str | None = None
+    intervalo_seguridad_dias: int | None = None
+    aprobacion_organica_omri: bool | None = None
+    compatible_exportacion_usda: bool | None = None
+    recomendacion_agronomica: str
+    fragmento_oficial_citado: str
+    fuente_documental: str
 
 
 class ResultadoRecuperacion(BaseModel):
@@ -150,8 +75,13 @@ class ResultadoRecuperacion(BaseModel):
 class MotorPhytoRAG:
     """Motor RAG Híbrido especializado en cumplimiento fitosanitario y vademécum oficial."""
 
-    def __init__(self, vector_db_path: Path | None = None):
+    def __init__(
+        self,
+        vector_db_path: Path | None = None,
+        corpus_path: Path | None = None,
+    ):
         self.db_path = vector_db_path or VECTOR_STORE_DIR
+        self.corpus_path = corpus_path or CORPUS_OFICIAL_FILE
         self.db_path.mkdir(parents=True, exist_ok=True)
         DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
 
@@ -162,8 +92,8 @@ class MotorPhytoRAG:
             metadata={"hnsw:space": "cosine"},
         )
 
-        # 2. Cargar e indexar corpus oficial (semilla o procesado)
-        self.documentos = self._cargar_o_crear_corpus()
+        # 2. Cargar e indexar corpus oficial aprobado
+        self.documentos = self._cargar_corpus()
         self._indexar_en_chromadb()
 
         # 3. Inicializar índice léxico BM25
@@ -178,39 +108,61 @@ class MotorPhytoRAG:
         texto_limpio = re.sub(r"[^\w\s]", " ", texto.lower())
         return [t for t in texto_limpio.split() if len(t) > 1]
 
-    def _cargar_o_crear_corpus(self) -> list[dict[str, Any]]:
-        """Carga documentos procesados en JSON o inicializa con las fichas semilla oficiales."""
-        archivo_semilla = DATA_PROCESSED / "fichas_semilla.json"
+    def _cargar_corpus(self) -> list[dict[str, Any]]:
+        """Carga exclusivamente el corpus aprobado desde corpus_motor_rag.json.
+
+        Si el archivo no existe o está vacío, arranca en limpio sin crear archivos semilla
+        ni indexar archivos de cuarentena.
+        """
+        if not self.corpus_path.exists():
+            return []
+
         documentos_cargados = []
+        try:
+            with open(self.corpus_path, "r", encoding="utf-8") as f:
+                datos = json.load(f)
+                if isinstance(datos, list):
+                    documentos_cargados = datos
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[AVISO] Error al leer archivo {self.corpus_path}: {e}")
+            return []
 
-        # Si el archivo semilla no existe en data/processed, lo creamos
-        if not archivo_semilla.exists():
-            with open(archivo_semilla, "w", encoding="utf-8") as f:
-                json.dump(FICHAS_OFICIALES_SEMILLA, f, ensure_ascii=False, indent=2)
-
-        # Leer todos los archivos JSON en data/processed
-        for archivo in DATA_PROCESSED.glob("*.json"):
-            try:
-                with open(archivo, "r", encoding="utf-8") as f:
-                    datos = json.load(f)
-                    if isinstance(datos, list):
-                        documentos_cargados.extend(datos)
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"[AVISO] Error al leer archivo {archivo}: {e}")
-
-        # Formatear documentos para indexación
+        # Formatear documentos para indexación tolerando campos nulos
         corpus_formateado = []
         for ficha in documentos_cargados:
+            is_dias = ficha.get("intervalo_seguridad_dias")
+            is_dias_str = (
+                f"{is_dias} días"
+                if is_dias is not None
+                else "No especificado / Sin límite"
+            )
+
+            omri_val = ficha.get("aprobado_omri")
+            omri_str = (
+                "Sí"
+                if omri_val is True
+                else ("No" if omri_val is False else "Desconocido")
+            )
+
+            usda_val = ficha.get("compatible_exportacion_usda")
+            usda_str = (
+                "Sí"
+                if usda_val is True
+                else ("No" if usda_val is False else "Desconocido")
+            )
+
+            dosis_str = ficha.get("dosis_autorizada") or "No especificada"
+
             texto_completo = (
                 f"Cultivo: {ficha.get('cultivo', '')}. "
                 f"Problema o Plaga: {ficha.get('problema_fitosanitario', '')}. "
                 f"Producto Comercial: {ficha.get('producto_comercial', '')}. "
                 f"Ingrediente Activo: {ficha.get('ingrediente_activo', '')}. "
                 f"Registro COFEPRIS: {ficha.get('registro_sanitario_cofepris', '')}. "
-                f"Dosis Oficial: {ficha.get('dosis_autorizada', '')}. "
-                f"Intervalo de Seguridad: {ficha.get('intervalo_seguridad_dias', 0)} días. "
-                f"Aprobación Orgánica OMRI: {'Sí' if ficha.get('aprobado_omri') else 'No'}. "
-                f"Apto Exportación USDA: {'Sí' if ficha.get('compatible_exportacion_usda') else 'No'}. "
+                f"Dosis Oficial: {dosis_str}. "
+                f"Intervalo de Seguridad: {is_dias_str}. "
+                f"Aprobación Orgánica OMRI: {omri_str}. "
+                f"Apto Exportación USDA: {usda_str}. "
                 f"Detalle Oficial: {ficha.get('fragmento_oficial_citado', '')} "
                 f"Recomendación: {ficha.get('recomendacion_agronomica', '')}"
             )
@@ -226,7 +178,10 @@ class MotorPhytoRAG:
         return corpus_formateado
 
     def _indexar_en_chromadb(self):
-        """Indexa los documentos en la colección de ChromaDB si no están presentes."""
+        """Indexa los documentos en la colección de ChromaDB tolerando valores nulos."""
+        if not self.documentos:
+            return
+
         existentes = set(self.collection.get()["ids"])
         por_insertar_ids = []
         por_insertar_docs = []
@@ -237,27 +192,29 @@ class MotorPhytoRAG:
             if doc_id not in existentes:
                 por_insertar_ids.append(doc_id)
                 por_insertar_docs.append(doc["texto_completo"])
+
+                raw_is = doc["metadatos"].get("intervalo_seguridad_dias")
+                is_dias_val = int(raw_is) if raw_is is not None else -1
+
                 # ChromaDB requiere que los valores de metadatos sean tipos primitivos
                 meta_plano = {
                     "producto_comercial": str(
-                        doc["metadatos"].get("producto_comercial", "")
+                        doc["metadatos"].get("producto_comercial") or ""
                     ),
                     "ingrediente_activo": str(
-                        doc["metadatos"].get("ingrediente_activo", "")
+                        doc["metadatos"].get("ingrediente_activo") or ""
                     ),
                     "registro_sanitario_cofepris": str(
-                        doc["metadatos"].get("registro_sanitario_cofepris", "")
+                        doc["metadatos"].get("registro_sanitario_cofepris") or ""
                     ),
-                    "cultivo": str(doc["metadatos"].get("cultivo", "")),
+                    "cultivo": str(doc["metadatos"].get("cultivo") or ""),
                     "dosis_autorizada": str(
-                        doc["metadatos"].get("dosis_autorizada", "")
+                        doc["metadatos"].get("dosis_autorizada") or ""
                     ),
-                    "intervalo_seguridad_dias": int(
-                        doc["metadatos"].get("intervalo_seguridad_dias", 0)
-                    ),
-                    "aprobado_omri": bool(doc["metadatos"].get("aprobado_omri", False)),
-                    "compatible_exportacion_usda": bool(
-                        doc["metadatos"].get("compatible_exportacion_usda", False)
+                    "intervalo_seguridad_dias": is_dias_val,
+                    "aprobado_omri": str(doc["metadatos"].get("aprobado_omri")),
+                    "compatible_exportacion_usda": str(
+                        doc["metadatos"].get("compatible_exportacion_usda")
                     ),
                 }
                 por_insertar_metadatos.append(meta_plano)
@@ -279,11 +236,7 @@ class MotorPhytoRAG:
         k_rrf: int = 60,
         cultivo: str | None = None,
     ) -> list[ResultadoRecuperacion]:
-        """
-        Recuperación híbrida usando Reciprocal Rank Fusion (RRF) con filtro estricto por cultivo y alineación patológica.
-        Combina los rankings de BM25 (léxico) y ChromaDB (semántico), previniendo recomendaciones fuera de etiqueta (off-label)
-        y descartando candidatos cuya coincidencia con la plaga/enfermedad sea insuficiente.
-        """
+        """Recuperación híbrida usando Reciprocal Rank Fusion (RRF) con filtro estricto por cultivo."""
         if not self.documentos:
             return []
 
@@ -313,7 +266,7 @@ class MotorPhytoRAG:
 
         # Auto-detección de cultivo si no fue provisto explícitamente
         if not cultivo:
-            for c_candidato in ["limon", "limón", "mango", "papaya"]:
+            for c_candidato in MAPA_CULTIVOS_CANONICOS:
                 if c_candidato in tokens_query or c_candidato in query.lower():
                     cultivo = c_candidato
                     break
@@ -365,16 +318,16 @@ class MotorPhytoRAG:
             if not doc_info:
                 continue
 
-            # A) Filtro Estricto por Cultivo (Inviolabilidad Regulatoria COFEPRIS)
+            # A) Filtro Estricto por Cultivo Normalizado
             if cultivo:
-                cultivo_doc_norm = (
+                cultivo_doc_norm = normalizar_cultivo(
                     str(doc_info["metadatos"].get("cultivo", ""))
-                    .lower()
-                    .replace("ó", "o")
                 )
-                cultivo_solic_norm = cultivo.lower().replace("ó", "o")
-                if cultivo_solic_norm not in cultivo_doc_norm:
-                    # Descartar: producto registrado para otro frutal
+                cultivo_solic_norm = normalizar_cultivo(cultivo)
+                if (
+                    cultivo_solic_norm != cultivo_doc_norm
+                    and cultivo_solic_norm not in cultivo_doc_norm
+                ):
                     continue
 
             # B) Filtro de Alineación Patológica
@@ -386,7 +339,6 @@ class MotorPhytoRAG:
                     set(texto_problema_doc)
                 )
                 if not coincidencias:
-                    # Descartar candidato con relevancia patológica insuficiente
                     continue
 
             resultados_finales.append(
@@ -408,16 +360,11 @@ class MotorPhytoRAG:
         contexto: list[ResultadoRecuperacion],
         regimen: str = "convencional",
         cultivo: str | None = None,
-    ) -> dict[str, Any]:
-        """
-        Genera el dictamen agronómico oficial empleando guardrails deterministas estrictos.
-        Garantiza CERO ALUCINACIONES en dosis, ingredientes activos y registros COFEPRIS:
-        todos los campos regulatorios se sellan de forma determinista desde la ficha oficial
-        recuperada y NUNCA provienen de texto libre del LLM.
-        """
+    ) -> RecomendacionTratamiento:
+        """Genera el dictamen agronómico oficial empleando guardrails deterministas estrictos."""
         # Auto-detección de cultivo si no fue provisto
         if not cultivo:
-            for c_candidato in ["limon", "limón", "mango", "papaya"]:
+            for c_candidato in MAPA_CULTIVOS_CANONICOS:
                 if c_candidato in consulta_texto.lower():
                     cultivo = c_candidato
                     break
@@ -434,139 +381,202 @@ class MotorPhytoRAG:
                     "Se recomienda acudir con un ingeniero agrónomo certificado antes de aplicar insumos no verificados."
                 )
             )
-            return {
-                "producto_comercial": "No localizado",
-                "ingrediente_activo": "Sin coincidencia oficial",
-                "registro_sanitario_cofepris": "No disponible",
-                "dosis_autorizada": "No autorizada en el vademécum para esta consulta",
-                "intervalo_seguridad_dias": 0,
-                "aprobacion_organica_omri": False,
-                "compatible_exportacion_usda": False,
-                "recomendacion_agronomica": mensaje_sin_contexto,
-                "fragmento_oficial_citado": "Sin evidencia documental autorizada para este cultivo.",
-                "fuente_documental": "Vademécum Oficial PhytoRAG-Tropical",
-            }
+            return RecomendacionTratamiento(
+                producto_comercial="No localizado",
+                ingrediente_activo="Sin coincidencia oficial",
+                registro_sanitario_cofepris="No disponible",
+                dosis_autorizada=None,
+                intervalo_seguridad_dias=None,
+                aprobacion_organica_omri=None,
+                compatible_exportacion_usda=None,
+                recomendacion_agronomica=mensaje_sin_contexto,
+                fragmento_oficial_citado="Sin evidencia documental autorizada para este cultivo.",
+                fuente_documental="Vademécum Oficial PhytoRAG-Tropical",
+            )
 
         # Caso 2: Filtrado Estricto por Cultivo (Blindaje contra vulnerabilidad Off-label)
         candidatos = contexto
         if cultivo:
-            cultivo_solic_norm = cultivo.lower().replace("ó", "o")
+            cultivo_solic_norm = normalizar_cultivo(cultivo)
             candidatos_cultivo = [
                 c
                 for c in contexto
-                if cultivo_solic_norm
-                in str(c.metadatos.get("cultivo", "")).lower().replace("ó", "o")
+                if (
+                    cultivo_solic_norm
+                    == normalizar_cultivo(str(c.metadatos.get("cultivo", "")))
+                    or cultivo_solic_norm
+                    in normalizar_cultivo(str(c.metadatos.get("cultivo", "")))
+                )
             ]
             if not candidatos_cultivo:
-                return {
-                    "producto_comercial": "No autorizado para este cultivo",
-                    "ingrediente_activo": "Sin registro oficial para el cultivo",
-                    "registro_sanitario_cofepris": "N/A",
-                    "dosis_autorizada": "No aplicable",
-                    "intervalo_seguridad_dias": 0,
-                    "aprobacion_organica_omri": False,
-                    "compatible_exportacion_usda": False,
-                    "recomendacion_agronomica": (
+                return RecomendacionTratamiento(
+                    producto_comercial="No autorizado para este cultivo",
+                    ingrediente_activo="Sin registro oficial para el cultivo",
+                    registro_sanitario_cofepris="N/A",
+                    dosis_autorizada=None,
+                    intervalo_seguridad_dias=None,
+                    aprobacion_organica_omri=None,
+                    compatible_exportacion_usda=None,
+                    recomendacion_agronomica=(
                         f"RECHAZO REGULATORIO (OFF-LABEL): No existe ningún producto autorizado en el catálogo oficial "
                         f"para el cultivo de {cultivo} bajo los criterios consultados. En la legislación mexicana (COFEPRIS), "
                         "está estrictamente prohibido aplicar productos registrados para otros cultivos."
                     ),
-                    "fragmento_oficial_citado": "Infracción por uso fuera de etiqueta (off-label).",
-                    "fuente_documental": "Catálogo Oficial COFEPRIS / SENASICA",
-                }
+                    fragmento_oficial_citado="Infracción por uso fuera de etiqueta (off-label).",
+                    fuente_documental="Catálogo Oficial COFEPRIS / SENASICA",
+                )
             candidatos = candidatos_cultivo
 
-        # Caso 3: Validación Determinista de Régimen Orgánico OMRI (Sin fallback silencioso a convencional)
+        # Caso 3: Validación de Régimen Orgánico OMRI (3 estados: True, False, None/desconocido)
         if regimen == "organico_omri":
             candidatos_organicos = [
-                c for c in candidatos if bool(c.metadatos.get("aprobado_omri")) is True
+                c for c in candidatos if c.metadatos.get("aprobado_omri") is True
             ]
-            if not candidatos_organicos:
-                return {
-                    "producto_comercial": "No autorizado para régimen orgánico",
-                    "ingrediente_activo": "Sin bioinsumo orgánico certificado en catálogo",
-                    "registro_sanitario_cofepris": "N/A",
-                    "dosis_autorizada": "No aplicable",
-                    "intervalo_seguridad_dias": 0,
-                    "aprobacion_organica_omri": False,
-                    "compatible_exportacion_usda": False,
-                    "recomendacion_agronomica": (
-                        "RECHAZO REGULATORIO: La consulta solicita tratamiento en régimen orgánico (OMRI/LPO), "
-                        f"pero no existe ningún insumo con certificación orgánica autorizado en el catálogo oficial "
-                        f"para {cultivo or 'este cultivo'}. Está estrictamente prohibido aplicar productos sintéticos "
-                        "convencionales en huertas orgánicas."
-                    ),
-                    "fragmento_oficial_citado": "Sin registro orgánico OMRI aplicable para el cultivo.",
-                    "fuente_documental": "Vademécum Oficial OMRI / LPO México",
-                }
-            candidatos = candidatos_organicos
+            if candidatos_organicos:
+                candidatos = candidatos_organicos
+            else:
+                # Distinguir entre desconocido y explícitamente no aprobado
+                candidatos_desconocidos = [
+                    c for c in candidatos if c.metadatos.get("aprobado_omri") is None
+                ]
+                if candidatos_desconocidos:
+                    return RecomendacionTratamiento(
+                        producto_comercial="Certificación orgánica no verificada",
+                        ingrediente_activo="Sin información de certificación en catálogo oficial",
+                        registro_sanitario_cofepris="N/A",
+                        dosis_autorizada=None,
+                        intervalo_seguridad_dias=None,
+                        aprobacion_organica_omri=None,
+                        compatible_exportacion_usda=None,
+                        recomendacion_agronomica=(
+                            f"INFORMACIÓN NO VERIFICADA: Los registros oficiales recuperados para {cultivo or 'este cultivo'} "
+                            "no cuentan con información confirmada sobre certificación orgánica (OMRI/LPO). Se recomienda "
+                            "consultar a un organismo de certificación orgánica o a un profesional agronómico antes de aplicar cualquier insumo."
+                        ),
+                        fragmento_oficial_citado="Sin información verificada de certificación orgánica.",
+                        fuente_documental="Vademécum Oficial OMRI / LPO México",
+                    )
+                else:
+                    return RecomendacionTratamiento(
+                        producto_comercial="No autorizado para régimen orgánico",
+                        ingrediente_activo="Sin bioinsumo orgánico certificado en catálogo",
+                        registro_sanitario_cofepris="N/A",
+                        dosis_autorizada=None,
+                        intervalo_seguridad_dias=None,
+                        aprobacion_organica_omri=False,
+                        compatible_exportacion_usda=None,
+                        recomendacion_agronomica=(
+                            "RECHAZO REGULATORIO: La consulta solicita tratamiento en régimen orgánico (OMRI/LPO), "
+                            f"pero los insumos oficiales autorizados para {cultivo or 'este cultivo'} son de síntesis química "
+                            "convencional y tienen prohibida su aplicación en huertas orgánicas."
+                        ),
+                        fragmento_oficial_citado="Sin registro orgánico OMRI aplicable para el cultivo.",
+                        fuente_documental="Vademécum Oficial OMRI / LPO México",
+                    )
 
-        # Caso 4: Validación Determinista de Régimen Exportación USDA
+        # Caso 4: Validación de Régimen Exportación USDA (3 estados: True, False, None/desconocido)
         elif regimen == "exportacion_usda":
             candidatos_usda = [
                 c
                 for c in candidatos
-                if bool(c.metadatos.get("compatible_exportacion_usda")) is True
+                if c.metadatos.get("compatible_exportacion_usda") is True
             ]
-            if not candidatos_usda:
-                return {
-                    "producto_comercial": "No apto para exportación USDA",
-                    "ingrediente_activo": "Riesgo de residuo o LMR no compatible",
-                    "registro_sanitario_cofepris": "N/A",
-                    "dosis_autorizada": "No aplicable",
-                    "intervalo_seguridad_dias": 0,
-                    "aprobacion_organica_omri": False,
-                    "compatible_exportacion_usda": False,
-                    "recomendacion_agronomica": (
-                        f"RECHAZO POR NORMATIVA DE EXPORTACIÓN: Los insumos recuperados para {cultivo or 'este cultivo'} "
-                        "no cuentan con tolerancia aprobada de Límites Máximos de Residuos (LMR) por EPA/USDA para exportación "
-                        "hacia EE.UU. Su aplicación provocaría el rechazo del embarque en aduanas."
-                    ),
-                    "fragmento_oficial_citado": "Incompatible con tolerancias de exportación USDA/EPA.",
-                    "fuente_documental": "Límites Máximos de Residuos USDA / EPA",
-                }
-            candidatos = candidatos_usda
+            if candidatos_usda:
+                candidatos = candidatos_usda
+            else:
+                candidatos_desconocidos = [
+                    c
+                    for c in candidatos
+                    if c.metadatos.get("compatible_exportacion_usda") is None
+                ]
+                if candidatos_desconocidos:
+                    return RecomendacionTratamiento(
+                        producto_comercial="Compatibilidad de exportación no verificada",
+                        ingrediente_activo="Sin información de LMR/EPA en catálogo oficial",
+                        registro_sanitario_cofepris="N/A",
+                        dosis_autorizada=None,
+                        intervalo_seguridad_dias=None,
+                        aprobacion_organica_omri=None,
+                        compatible_exportacion_usda=None,
+                        recomendacion_agronomica=(
+                            f"INFORMACIÓN NO VERIFICADA: No se dispone de datos verificados sobre tolerancias de Límites Máximos "
+                            f"de Residuos (LMR) por EPA/USDA para los insumos de {cultivo or 'este cultivo'}. Se recomienda "
+                            "consultar con el departamento técnico de exportación o la regulación de la EPA antes de aplicar el producto."
+                        ),
+                        fragmento_oficial_citado="Sin información verificada de tolerancias EPA/USDA.",
+                        fuente_documental="Límites Máximos de Residuos USDA / EPA",
+                    )
+                else:
+                    return RecomendacionTratamiento(
+                        producto_comercial="No apto para exportación USDA",
+                        ingrediente_activo="Riesgo de residuo o LMR no compatible",
+                        registro_sanitario_cofepris="N/A",
+                        dosis_autorizada=None,
+                        intervalo_seguridad_dias=None,
+                        aprobacion_organica_omri=None,
+                        compatible_exportacion_usda=False,
+                        recomendacion_agronomica=(
+                            f"RECHAZO POR NORMATIVA DE EXPORTACIÓN: Los insumos recuperados para {cultivo or 'este cultivo'} "
+                            "no cuentan con tolerancia aprobada de Límites Máximos de Residuos (LMR) por EPA/USDA para exportación "
+                            "hacia EE.UU. Su aplicación provocaría el rechazo del embarque en aduanas."
+                        ),
+                        fragmento_oficial_citado="Incompatible con tolerancias de exportación USDA/EPA.",
+                        fuente_documental="Límites Máximos de Residuos USDA / EPA",
+                    )
 
         mejor_candidato = candidatos[0]
         meta = mejor_candidato.metadatos
+        raw_is = meta.get("intervalo_seguridad_dias")
+        intervalo_seguridad = int(raw_is) if raw_is is not None else None
 
-        # Preparar contexto documental para el LLM
-        contexto_str = "\n\n".join(
-            [f"[Documento ID: {c.id_documento}]\n{c.texto}" for c in candidatos]
-        )
-
-        # Base canónica determinista (Inviolable: CERO ALUCINACIONES)
+        # Base canónica determinista sellada desde la ficha oficial
         dictamen_base = {
-            "producto_comercial": str(meta.get("producto_comercial", "")),
-            "ingrediente_activo": str(meta.get("ingrediente_activo", "")),
+            "producto_comercial": str(meta.get("producto_comercial") or ""),
+            "ingrediente_activo": str(meta.get("ingrediente_activo") or ""),
             "registro_sanitario_cofepris": str(
-                meta.get("registro_sanitario_cofepris", "")
+                meta.get("registro_sanitario_cofepris") or ""
             ),
-            "dosis_autorizada": str(meta.get("dosis_autorizada", "")),
-            "intervalo_seguridad_dias": int(meta.get("intervalo_seguridad_dias", 0)),
-            "aprobacion_organica_omri": bool(meta.get("aprobado_omri", False)),
-            "compatible_exportacion_usda": bool(
-                meta.get("compatible_exportacion_usda", False)
+            "dosis_autorizada": (
+                str(meta.get("dosis_autorizada"))
+                if meta.get("dosis_autorizada") is not None
+                else None
             ),
-            "fragmento_oficial_citado": str(meta.get("fragmento_oficial_citado", "")),
-            "fuente_documental": str(meta.get("fuente_documental", "COFEPRIS / OMRI")),
-            "recomendacion_agronomica": str(meta.get("recomendacion_agronomica", "")),
+            "intervalo_seguridad_dias": intervalo_seguridad,
+            "aprobacion_organica_omri": meta.get("aprobado_omri"),
+            "compatible_exportacion_usda": meta.get("compatible_exportacion_usda"),
+            "fragmento_oficial_citado": str(meta.get("fragmento_oficial_citado") or ""),
+            "fuente_documental": str(
+                meta.get("fuente_documental") or "COFEPRIS / OMRI"
+            ),
+            "recomendacion_agronomica": str(
+                meta.get("recomendacion_agronomica")
+                or "Consultar indicaciones de la etiqueta oficial."
+            ),
         }
 
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key.startswith("AIzaSyTuClaveAqui"):
-            return dictamen_base
+            return RecomendacionTratamiento(**dictamen_base)
 
         try:
             from google import genai
 
             client = genai.Client(api_key=api_key)
+
+            # Pasar a Gemini EXCLUSIVAMENTE el contexto del candidato elegido (no todos)
+            contexto_candidato = (
+                f"[Documento ID: {mejor_candidato.id_documento}]\n"
+                f"{mejor_candidato.texto}"
+            )
+
             prompt_sistema = (
                 "Eres el Consultor Agronómico PhytoRAG-Tropical, especializado en vademécum de México.\n"
-                "INSTRUCCIONES:\n"
-                "Genera una recomendación agronómica breve y profesional en español para el agricultor, "
+                "INSTRUCCIONES OBLIGATORIAS:\n"
+                "1. Genera una recomendación agronómica breve y profesional en español para el agricultor, "
                 "enfocándote en el momento oportuno de aplicación y precauciones según el siguiente contexto oficial.\n"
-                f"CONTEXTO OFICIAL:\n{contexto_str}\n\n"
+                "2. PROHIBICIÓN ESTRICTA DE CIFRAS: NO incluyas números, cantidades, dosis numéricas ni días de intervalo "
+                "de seguridad en tu narrativa; todos esos datos ya están tabulados en la ficha oficial.\n\n"
+                f"CONTEXTO OFICIAL DEL INSUMO ELEGIDO:\n{contexto_candidato}\n\n"
                 f"CONSULTA: {consulta_texto} (Régimen: {regimen})\n"
                 "RESPONDE ÚNICAMENTE EL PÁRRAFO DE LA RECOMENDACIÓN AGRONÓMICA:"
             )
@@ -577,31 +587,29 @@ class MotorPhytoRAG:
                 contents=prompt_sistema,
             )
 
-            narrativa = respuesta.text.strip()
-            if narrativa:
-                # El LLM solo enriquece la narrativa; los campos normativos siguen sellados deterministamente
+            narrativa = respuesta.text.strip() if hasattr(respuesta, "text") else ""
+
+            # Validar que la narrativa no contenga cifras/números (prevención de alucinaciones)
+            if re.search(r"\d", narrativa):
+                print(
+                    "[Guardrail] Narrativa del LLM contenía cifras numéricas no permitidas. "
+                    "Se descarta y se aplica recomendación determinista de la ficha."
+                )
+            elif narrativa:
                 dictamen_base["recomendacion_agronomica"] = narrativa
 
-            return dictamen_base
+            return RecomendacionTratamiento(**dictamen_base)
 
         except Exception as e:  # noqa: BLE001
             print(
                 f"[AVISO] Error o aviso con LLM ({e}). Aplicando dictamen determinista oficial."
             )
-            return dictamen_base
+            return RecomendacionTratamiento(**dictamen_base)
 
 
 if __name__ == "__main__":
     print("[Alumno 2] Inicializando Motor PhytoRAG...")
     motor = MotorPhytoRAG()
-    print("[OK] Motor PhytoRAG inicializado correctamente.")
-
-    # Prueba de búsqueda híbrida de control
-    query_prueba = "Cancro bacteriano en huerta de limón"
-    print(f"\n[BUSQUEDA] Probando recuperacion para: '{query_prueba}'")
-    recuperados = motor.recuperar_documentos(query_prueba, top_k=2)
-    for idx, doc in enumerate(recuperados, 1):
-        print(f"\n--- Resultado #{idx} (Score RRF: {doc.score}) ---")
-        print(f"Producto: {doc.metadatos.get('producto_comercial')}")
-        print(f"Dosis: {doc.metadatos.get('dosis_autorizada')}")
-        print(f"Registro: {doc.metadatos.get('registro_sanitario_cofepris')}")
+    print(
+        f"[OK] Motor PhytoRAG inicializado correctamente con {len(motor.documentos)} documentos."
+    )

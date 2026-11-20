@@ -17,6 +17,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+try:
+    from src.rag_engine import MotorPhytoRAG, RecomendacionTratamiento
+except ModuleNotFoundError:
+    from rag_engine import MotorPhytoRAG, RecomendacionTratamiento
+
 load_dotenv()
 
 app = FastAPI(
@@ -45,21 +50,6 @@ class ConsultaFitosanitaria(BaseModel):
     )
 
 
-class RecomendacionTratamiento(BaseModel):
-    """Esquema de salida estructurada de la recomendación fitosanitaria."""
-
-    producto_comercial: str
-    ingrediente_activo: str
-    registro_sanitario_cofepris: str
-    dosis_autorizada: str
-    intervalo_seguridad_dias: int
-    aprobacion_organica_omri: bool
-    compatible_exportacion_usda: bool
-    recomendacion_agronomica: str
-    fragmento_oficial_citado: str
-    fuente_documental: str
-
-
 @app.get("/")
 def estado_servicio():
     return {
@@ -70,11 +60,6 @@ def estado_servicio():
         "documentacion": "/docs",
     }
 
-
-try:
-    from src.rag_engine import MotorPhytoRAG
-except ModuleNotFoundError:
-    from rag_engine import MotorPhytoRAG
 
 # Instancia global del Motor RAG Híbrido
 motor_rag = MotorPhytoRAG()
@@ -105,7 +90,7 @@ def consultar_fitosanidad(consulta: ConsultaFitosanitaria):
             cultivo=consulta.cultivo,
         )
 
-        return RecomendacionTratamiento(**resultado)
+        return resultado
     except Exception as e:
         raise HTTPException(
             status_code=500,
