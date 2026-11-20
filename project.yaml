@@ -1,0 +1,74 @@
+version: "1.0.0"
+project_id: "phytorag-tropical"
+title: "PhytoRAG-Tropical: A Hybrid Retrieval-Augmented Generation Architecture with Deterministic Regulatory Guardrails for Zero-Hallucination Phytosanitary Dosage in Tropical Agriculture"
+target_venue: "Computers and Electronics in Agriculture"
+authors:
+  - "Carlos Flores-Cortés"
+  - "Coauthor PhytoRAG 1"
+  - "Coauthor PhytoRAG 2"
+
+thesis:
+  core_hypothesis: "Una arquitectura RAG híbrida (búsqueda léxica BM25 + embeddings densos + re-ranking) acoplada a guardrails deterministas de filtrado normativo y esquemas Pydantic elimina las alucinaciones críticas en dosificación numérica y previene violaciones regulatorias (COFEPRIS/OMRI/EPA) frente a LLMs generalistas y RAGs vectoriales simples en cultivos tropicales."
+  key_contributions:
+    - "Evaluación comparativa empírica de 4 arquitecturas RAG frente a un benchmark de 100+ consultas agronómicas adversarias."
+    - "Pipeline de recuperación híbrida (BM25 + ChromaDB + Re-ranker) con filtrado estricto por vademécum fitosanitario."
+    - "Contratos deterministas Pydantic que garantizan validación estricta de dosis, intervalos de seguridad y límites máximos de residuos (LMR)."
+
+experimental_stack:
+  target_crops:
+    - "Limón Mexicano / Colima (Citrus aurantifolia)"
+    - "Mango (Mangifera indica)"
+    - "Papaya (Carica papaya)"
+  target_diseases:
+    - "HLB / Dragón Amarillo"
+    - "Antracnosis"
+    - "Cenicilla"
+    - "Acaro blanco"
+  datasets:
+    - "Catálogo Oficial de Plaguicidas COFEPRIS / SENASICA"
+    - "Listado de Insumos Permitidos OMRI / LPO"
+    - "Guía de Límites Máximos de Residuos EPA / USDA"
+    - "PhytoRAG 100 Adversarial Query Benchmark"
+  models_under_evaluation:
+    rag_architectures:
+      - "M1: LLM Directo (Gemini 2.5 Flash / GPT-4o-mini)"
+      - "M2: RAG Vectorial Denso (ChromaDB + OpenAI/Gemini Embeddings)"
+      - "M3: RAG Híbrido (BM25 + ChromaDB + BGE Re-ranker)"
+      - "M4: RAG Híbrido + Guardrails Estructurados (Pydantic + Filtro Normativo)"
+    embedding_models:
+      - "text-embedding-3-large"
+      - "bge-m3"
+      - "gemini-embedding-004"
+  target_hardware:
+    - "Local Workstation (GPU RTX 4090)"
+    - "Cloud API Ingestion Subsystem"
+  metrics:
+    - "Faithfulness (RAGAS)"
+    - "Dosage Accuracy (%)"
+    - "Regulatory Violation Rate (%)"
+    - "Context Recall"
+    - "Answer Relevance"
+
+literature_mission:
+  area: "Retrieval-Augmented Generation, Phytosanitary Compliance and Hallucination Mitigation in Agriculture"
+  min_year: 2023
+  daily_target: 3
+  total_cumulative_target: 27
+  search_axes:
+    - "Eje 1: Retrieval-Augmented Generation (RAG) and hybrid search in agriculture"
+    - "Eje 2: Hallucination mitigation and numerical accuracy in domain-specific LLMs"
+    - "Eje 3: Regulatory compliance and automated vademecum query systems"
+    - "Eje 4: RAG evaluation frameworks (RAGAS, TruLens) in high-stakes domains"
+  initial_search_terms:
+    - "retrieval augmented generation agriculture pest management"
+    - "hybrid search BM25 vector embeddings agricultural RAG"
+    - "LLM hallucination mitigation numerical dosage chemical"
+    - "regulatory compliance AI pesticide vademecum"
+    - "RAGAS evaluation domain specific question answering"
+
+workflow_guardrails:
+  max_review_rounds: 2
+  min_passing_score: 7.0
+  circuit_breaker_threshold: 6.0
+  word_count_limits:
+    total: 8000
