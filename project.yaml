@@ -1,53 +1,67 @@
-version: "1.0.0"
+version: "2.0.0"
 project_id: "phytorag-tropical"
+# Título y revista provisionales; se confirman antes de redactar el manuscrito (ver issue #9).
 title: "PhytoRAG-Tropical: A Hybrid Retrieval-Augmented Generation Architecture with Deterministic Regulatory Guardrails for Zero-Hallucination Phytosanitary Dosage in Tropical Agriculture"
 target_venue: "Computers and Electronics in Agriculture"
 authors:
   - "Carlos Flores-Cortés"
-  - "Coauthor PhytoRAG 1"
-  - "Coauthor PhytoRAG 2"
+  - "Ricardo Mercado López"
+  - "Sofía Renata Silva Méndez"
 
 thesis:
-  core_hypothesis: "Una arquitectura RAG híbrida (búsqueda léxica BM25 + embeddings densos + re-ranking) acoplada a guardrails deterministas de filtrado normativo y esquemas Pydantic elimina las alucinaciones críticas en dosificación numérica y previene violaciones regulatorias (COFEPRIS/OMRI/EPA) frente a LLMs generalistas y RAGs vectoriales simples en cultivos tropicales."
+  research_question: "¿Cuánto reducen la recuperación de fichas verificadas y los candados deterministas los errores de dosis y las recomendaciones fuera de etiqueta de un modelo de lenguaje, en consultas fitosanitarias de limón, mango y papaya?"
+  secondary_questions:
+    - "¿Qué aporta cada pieza por separado: la búsqueda semántica, la búsqueda léxica y los candados?"
+    - "¿Sabe el sistema abstenerse cuando la respuesta no está en su corpus o la consulta parte de una premisa falsa?"
+  framing: "El aporte es un diseño donde el modelo no genera los campos regulados (registro, dosis, intervalo de seguridad): salen de la ficha verificada. Se mide cuánto falla un modelo cuando sí los genera (M1 a M3) y cuánto deja de fallar cuando no (M4)."
   key_contributions:
-    - "Evaluación comparativa empírica de 4 arquitecturas RAG frente a un benchmark de 100+ consultas agronómicas adversarias."
-    - "Pipeline de recuperación híbrida (BM25 + ChromaDB + Re-ranker) con filtrado estricto por vademécum fitosanitario."
-    - "Contratos deterministas Pydantic que garantizan validación estricta de dosis, intervalos de seguridad y límites máximos de residuos (LMR)."
+    - "Corpus de fichas fitosanitarias con evidencia por campo, trazabilidad por hash y aprobación humana."
+    - "Banco de 100 consultas derivadas del corpus, en cinco tipos: con respuesta, cultivo no autorizado, régimen orgánico, sin respuesta y premisa falsa."
+    - "Comparación de cuatro arquitecturas (M1 a M4) con métricas deterministas, intervalos de confianza y pruebas pareadas."
 
 experimental_stack:
   target_crops:
-    - "Limón Mexicano / Colima (Citrus aurantifolia)"
+    - "Limonero (limón mexicano, Citrus aurantifolia)"
     - "Mango (Mangifera indica)"
-    - "Papaya (Carica papaya)"
-  target_diseases:
-    - "HLB / Dragón Amarillo"
-    - "Antracnosis"
-    - "Cenicilla"
-    - "Acaro blanco"
-  datasets:
-    - "Catálogo Oficial de Plaguicidas COFEPRIS / SENASICA"
-    - "Listado de Insumos Permitidos OMRI / LPO"
-    - "Guía de Límites Máximos de Residuos EPA / USDA"
-    - "PhytoRAG 100 Adversarial Query Benchmark"
+    - "Papayo (Carica papaya)"
+  corpus:
+    target_approved_records: 20
+    evidence_criterion: "Etiqueta publicada por el fabricante (titular del registro) con SHA-256, consulta de COFEPRIS que confirma registro, ingrediente, cultivo y vigencia, y aprobación humana."
+  benchmark:
+    queries: 100
+    phrasings_per_query: 2
+    types:
+      - "A: con respuesta (40)"
+      - "B: cultivo no autorizado (20)"
+      - "C: régimen orgánico (15)"
+      - "D: sin respuesta en el corpus (15)"
+      - "E: premisa falsa (10)"
   models_under_evaluation:
+    generator: "gemini-3.5-flash-lite"
+    repetitions: 3
     rag_architectures:
-      - "M1: LLM Directo (Gemini 2.5 Flash / GPT-4o-mini)"
-      - "M2: RAG Vectorial Denso (ChromaDB + OpenAI/Gemini Embeddings)"
-      - "M3: RAG Híbrido (BM25 + ChromaDB + BGE Re-ranker)"
-      - "M4: RAG Híbrido + Guardrails Estructurados (Pydantic + Filtro Normativo)"
-    embedding_models:
-      - "text-embedding-3-large"
-      - "bge-m3"
-      - "gemini-embedding-004"
-  target_hardware:
-    - "Local Workstation (GPU RTX 4090)"
-    - "Cloud API Ingestion Subsystem"
+      - "M1: LLM directo, sin recuperación"
+      - "M2: RAG vectorial denso (ChromaDB)"
+      - "M3: RAG híbrido (BM25 + ChromaDB, fusión RRF)"
+      - "M4: RAG híbrido + guardrails deterministas (filtro por cultivo y régimen; campos regulados desde la ficha)"
   metrics:
-    - "Faithfulness (RAGAS)"
-    - "Dosage Accuracy (%)"
-    - "Regulatory Violation Rate (%)"
-    - "Context Recall"
-    - "Answer Relevance"
+    - "Registro COFEPRIS correcto"
+    - "Dosis correcta"
+    - "Intervalo de seguridad correcto"
+    - "Recomendación fuera de etiqueta (%)"
+    - "Violación de régimen orgánico (%)"
+    - "Abstención correcta e indebida"
+    - "Recuperación de la ficha esperada"
+    - "Intervalos de confianza al 95% por bootstrap y prueba exacta de McNemar"
+    - "Costo y tiempo por consulta"
+  optional_metrics:
+    - "Faithfulness (RAGAS) sobre una muestra"
+  out_of_scope_article_1:
+    - "Re-ranking (BGE / Cohere)"
+    - "Comparación de modelos de embeddings"
+    - "Régimen de exportación (LMR de EPA / USDA)"
+    - "Interfaz web"
+    - "Validación con agrónomos o productores"
 
 literature_mission:
   area: "Retrieval-Augmented Generation, Phytosanitary Compliance and Hallucination Mitigation in Agriculture"

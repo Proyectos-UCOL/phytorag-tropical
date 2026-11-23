@@ -11,8 +11,12 @@
 
 | Nombre | Correo institucional | GitHub | Rol en el proyecto |
 | :--- | :--- | :--- | :--- |
-| Ricardo Mercado López | rmercado0@ucol.mx | [@ricardo-lop](https://github.com/ricardo-lop) | Ingesta y Curaduría de Corpus (Issue #1) |
-| Sofía Renata Silva Méndez | ssilva14@ucol.mx | [@sofiarenasm](https://github.com/sofiarenasm) | Desarrollo RAG Híbrido (Issue #2) |
+| Ricardo Mercado López | rmercado0@ucol.mx | [@ricardo-lop](https://github.com/ricardo-lop) | Corpus, banco de consultas y análisis de errores (Issues #7 y #3) |
+| Sofía Renata Silva Méndez | ssilva14@ucol.mx | [@sofiarenasm](https://github.com/sofiarenasm) | Motor RAG, arquitecturas M1 a M4 y corredor de evaluación (Issues #2 y #8) |
+
+El equipo es de dos estudiantes. El trabajo que el plan original asignaba a un tercer integrante (banco de consultas y evaluación) quedó repartido entre ambos el 2026-11-23.
+
+**Meta actual:** Artículo 1. Ruta, calendario y reporte semanal en el [Issue #9](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/9).
 
 ---
 

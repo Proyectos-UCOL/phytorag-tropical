@@ -4,7 +4,7 @@
 **Institución:** Facultad de Telemática — Universidad de Colima  
 **Cuerpo Académico:** CA-54 Redes y Telecomunicaciones  
 **Tipo de Proyecto:** Investigación Aplicada y Servicio Social Constitucional (480 horas)  
-**Equipo:** 3 Estudiantes de Ingeniería Telemática / Software  
+**Equipo:** 2 Estudiantes de Ingeniería Telemática / Software  
 **Estado:** `activo`
 
 ---
@@ -18,39 +18,63 @@ En la agricultura moderna de exportación y producción agroecológica (como el 
 
 Los modelos de lenguaje generalistas (LLMs comerciales como ChatGPT o Gemini sin RAG) presentan **alucinaciones críticas en dosificación numérica** y **contaminación regulatoria entre países**, recomendando con frecuencia productos cancelados, dosis tóxicas o químicos prohibidos para exportación u orgánicos.
 
-**`PhytoRAG-Tropical`** es un sistema de **Generación Aumentada por Recuperación (RAG Híbrido con Guardrails Deterministas)** que actúa como un **Consultor Agronómico Digital de Máxima Fidelidad**, garantizando cero alucinaciones y estricto cumplimiento normativo.
+**`PhytoRAG-Tropical`** es un sistema de **Generación Aumentada por Recuperación (RAG Híbrido con Guardrails Deterministas)** que actúa como un **Consultor Agronómico Digital de Máxima Fidelidad**: responde solo con fichas verificadas y los campos regulados (registro, dosis e intervalo de seguridad) salen de la ficha, no del modelo.
 
 ---
 
-## 🔬 2. El Experimento Científico (Objetivo del Paper)
+## 🔬 2. El Experimento Científico (Objetivo del Artículo 1)
 
-El proyecto evalúa empíricamente 4 arquitecturas frente a un banco de evaluación estandarizado de 100+ consultas agronómicas adversarias de control:
+**Pregunta:** ¿cuánto reducen la recuperación de fichas verificadas y los candados deterministas los errores de dosis y las recomendaciones fuera de etiqueta de un modelo de lenguaje, en consultas fitosanitarias de limón, mango y papaya?
 
-| Arquitectura Evaluada | Descripción Técnica |
-| :--- | :--- |
-| **M1: Baseline LLM** | Modelo de lenguaje directo sin RAG (*Gemini 2.5 Flash / GPT-4o-mini*). |
-| **M2: RAG Vectorial Simple** | Búsqueda semántica densa estándar con Embeddings en base vectorial (*ChromaDB*). |
-| **M3: RAG Híbrido** | Recuperación combinada: Búsqueda léxica exact-match (*BM25*) + Embeddings densos + *Re-ranking* (*BGE / Cohere*). |
-| **M4: RAG Híbrido + Guardrails Estructurados** | RAG Híbrido con filtrado determinista de metadatos (*COFEPRIS / OMRI / USDA*) y esquemas *Pydantic*. |
+Se comparan 4 arquitecturas, con el mismo modelo generador, sobre un banco de **100 consultas derivadas de las fichas aprobadas del corpus**:
 
-### Métricas de Evaluación (Framework RAGAS):
-* **Fidelidad (*Faithfulness*):** Grado de apego al documento oficial (0% alucinación).
-* **Precisión de Dosificación (*Dosage Accuracy %*):** Exactitud numérica en la dosis recomendada ($g/L$, $L/ha$).
-* **Tasa de Violación Normativa (*Regulatory Violation Rate %*):** Porcentaje de recomendaciones que violan normativas orgánicas o de exportación.
-* **Context Recall & Answer Relevance:** Calidad de la recuperación documental y relevancia de la respuesta.
-* **Latencia y Costo Computacional por Consulta.**
+| Arquitectura | Recuperación | Quién llena registro, dosis e intervalo |
+| :--- | :--- | :--- |
+| **M1: Baseline LLM** | Ninguna | El modelo, de memoria |
+| **M2: RAG Vectorial Simple** | Búsqueda semántica densa (*ChromaDB*) | El modelo, leyendo el contexto recuperado |
+| **M3: RAG Híbrido** | Léxica (*BM25*) y semántica, fusionadas con RRF | El modelo, leyendo el contexto recuperado |
+| **M4: RAG Híbrido + Guardrails** | Híbrida, con filtro por cultivo y por régimen | La ficha verificada |
+
+### Banco de consultas
+
+| Tipo | Qué prueba | Cuántas |
+| :--- | :--- | :-: |
+| A. Con respuesta | Registro, dosis e intervalo correctos | 40 |
+| B. Cultivo no autorizado | Que no recomiende un producto de otro cultivo | 20 |
+| C. Régimen orgánico | Que no recomiende un producto no aprobado | 15 |
+| D. Sin respuesta en el corpus | Que se abstenga | 15 |
+| E. Premisa falsa | Que no confirme un dato equivocado | 10 |
+
+Cada consulta tiene dos redacciones: una técnica y una como la escribiría un productor.
+
+### Métricas de Evaluación
+
+Se calculan sin otro modelo como juez, con intervalos de confianza por bootstrap y comparación pareada de McNemar:
+
+* **Registro, dosis e intervalo de seguridad correctos** frente a la ficha esperada.
+* **Recomendación fuera de etiqueta** y **violación de régimen orgánico.**
+* **Abstención correcta** y **abstención indebida.**
+* **Recuperación:** la ficha esperada está entre las recuperadas.
+* **Costo, tiempo por consulta** y variación entre repeticiones.
+
+La fidelidad con RAGAS queda como complemento opcional.
+
+### Fuera del Artículo 1
+
+El re-ranking, la comparación de modelos de embeddings, el régimen de exportación (LMR de EPA y USDA), la interfaz web y la validación con agrónomos o productores.
 
 ---
 
-## 👥 3. Distribución de Roles del Equipo (3 Estudiantes)
+## 👥 3. Equipo, Roles y Ruta
 
-Para garantizar total autonomía y cero colisiones de código en Git (1 Ticket = 1 Alumno = 1 Rama):
+Plan, fechas y forma de trabajo: **[Issue #9](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/9)**.
 
-| Rol | Estudiante | Responsabilidad Principal | Entregable Clave |
-| :--- | :---: | :--- | :--- |
-| **Data & Corpus Lead** | **Alumno 1** | Ingesta, limpieza, chunking estructurado y metadata tagging del catálogo COFEPRIS, SENASICA, fichas DEAQ y lista OMRI. | `data/processed/`, `src/data_ingest.py` |
-| **RAG Architecture Lead** | **Alumno 2** | Implementación del motor RAG en Python (ChromaDB, BM25, embeddings, re-ranking y API con FastAPI). | `src/rag_engine.py`, `src/app.py` |
-| **Evaluation & UI Lead** | **Alumno 3** | Benchmark experimental con RAGAS, cálculo de métricas estadísticas, matrices y frontend web con Tailwind CSS. | `src/eval_benchmark.py`, `ui/` |
+| Rol | Estudiante | Responsabilidad Principal | Issues Vigentes |
+| :--- | :--- | :--- | :--- |
+| **Data, Corpus & Ground Truth Lead** | **Ricardo Mercado López** ([`@ricardo-lop`](https://github.com/ricardo-lop)) | Corpus de fichas con evidencia por campo y aprobación humana; banco de 100 consultas; análisis de errores. | [#7](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/7) · [#3](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/3) |
+| **RAG Architecture & Evaluation Lead** | **Sofía Renata Silva Méndez** ([`@SOFIARENASM`](https://github.com/SOFIARENASM)) | Motor RAG en Python (ChromaDB, BM25, API con FastAPI), arquitecturas M1 a M4 por configuración y corredor de evaluación. | [#2](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/2) · [#8](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/8) |
+
+**Criterio de evidencia del corpus:** una ficha se aprueba con la etiqueta publicada por el fabricante, la consulta de COFEPRIS que confirma el registro y la aprobación humana. Detalle en el [Issue #7](https://github.com/Proyectos-UCOL/phytorag-tropical/issues/7).
 
 ---
 
@@ -59,8 +83,8 @@ Para garantizar total autonomía y cero colisiones de código en Git (1 Ticket =
 | # | Entregable | Descripción | Ubicación |
 | :-: | :--- | :--- | :--- |
 | **E1** | **Pipeline de Software (Código)** | Sistema RAG híbrido modular, documentado y tipado en Python + FastAPI. | [`src/`](src/) |
-| **E2** | **Corpus Normativo Estructurado** | Base de datos vectorial y fichas JSON de COFEPRIS, SENASICA y OMRI indexadas. | [`data/`](data/) |
-| **E3** | **Benchmark Experimental y Resultados** | Tablas de métricas RAGAS, gráficas de alucinación y tiempos de respuesta. | [`results/`](results/) |
+| **E2** | **Corpus Normativo Estructurado** | Fichas JSON aprobadas, con evidencia y trazabilidad por campo, y su base vectorial. | [`data/`](data/) |
+| **E3** | **Benchmark Experimental y Resultados** | Banco de 100 consultas, tablas de métricas con intervalos de confianza y análisis de errores. | [`results/`](results/) |
 | **E4** | **Reporte Técnico de Servicio Social** | Documento oficial de acreditación para la Universidad de Colima. | [`deliverables/reporte-tecnico/`](deliverables/reporte-tecnico/) |
 | **E5** | **Manuscrito de Artículo Científico** | Manuscrito en formato internacional listo para revista indexada (JCR/Scopus). | [`deliverables/articulo-revista/`](deliverables/articulo-revista/) |
 
