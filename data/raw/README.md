@@ -29,3 +29,18 @@ procedencia, no como texto visible dentro de la imagen. Si la captura
 falta o su hash cambia, `python src/data_ingest.py` se detiene y explica el
 paso pendiente. Esta captura no aporta por sí sola dosis, plaga por cultivo,
 intervalo de seguridad ni reentrada.
+
+---
+
+# Criterio nuevo de evidencia para aprobación de fichas (2026-11-23)
+
+Conforme a la decisión de Carlos Flores (`@cfcortesmx`) para el Artículo 1 (Issue #7 y #9), una ficha fitosanitaria es **aprobable para el corpus oficial** cuando reúne tres elementos verificables de forma independiente:
+
+1. **La etiqueta publicada por el fabricante (titular del registro):**
+   Descargada y versionada con su SHA-256 en `data/raw/`. Es la fuente primaria oficial de la dosis, la unidad, el intervalo de seguridad (IS en días), el cultivo y el problema fitosanitario.
+2. **La consulta oficial de COFEPRIS:**
+   Captura o consulta oficial con su SHA-256 en `data/evidencia/` que confirma el número de registro sanitario, el ingrediente activo, los cultivos autorizados y la vigencia.
+3. **El registro de aprobación humana:**
+   Archivo formal `data/aprobaciones/<id_registro>.json` firmado por un revisor autorizado (Dr. Carlos Flores o agrónomo designado en `data/aprobaciones/revisores_autorizados.json`) y vinculado al hash exacto del documento revisado.
+
+Si la etiqueta del fabricante y la consulta de COFEPRIS discrepan en registro, ingrediente o cultivo, o si falta el registro de aprobación humana, la ficha permanece en cuarentena (`registros_pendientes_revision.json`) y **no** se indexa en `corpus_motor_rag.json`.

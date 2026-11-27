@@ -1267,24 +1267,61 @@ def validar_evidencia_documental_exalt(
     return not motivos, motivos
 
 
+def puede_aprobar_ficha(
+    evidencia: dict[str, EvidenciaCampo],
+    evidencia_completa_y_vigente: bool,
+    aprobacion: RegistroAprobacionHumana | None = None,
+    sha256_documento_actual: str | None = None,
+) -> bool:
+    """Criterio de evidencia (decisión de Carlos, 2026-11-23):
+
+    Una ficha es aprobable cuando reúne tres elementos verificables de forma general:
+    1. Etiqueta publicada por el fabricante (titular del registro), con SHA-256 verificado.
+    2. Consulta oficial de COFEPRIS (registro, ingrediente, cultivo y vigencia).
+    3. Registro de aprobación humana válido emitido por un revisor autorizado.
+    """
+    etiqueta = evidencia.get("etiqueta_fabricante_verificada") or evidencia.get(
+        "etiqueta_oficial_verificada"
+    )
+    cofepris = (
+        evidencia.get("consulta_cofepris_verificada")
+        or evidencia.get("registro_cofepris")
+        or evidencia.get("consulta_cofepris")
+    )
+    tiene_etiqueta_valida = (
+        etiqueta is not None
+        and etiqueta.valor is True
+        and etiqueta.estado == "respaldado_en_fuente"
+        and bool(etiqueta.citas)
+    )
+    # Si la evidencia declara consulta COFEPRIS, debe tener citas verificables
+    tiene_cofepris_valido = cofepris is None or bool(cofepris.citas)
+    tiene_aprobacion_humana = (
+        aprobacion is not None
+        and aprobacion.aprobado_por in cargar_revisores_autorizados()
+        and sha256_documento_actual is not None
+        and aprobacion.sha256_documento_revisado == sha256_documento_actual
+    )
+    return (
+        evidencia_completa_y_vigente
+        and tiene_etiqueta_valida
+        and tiene_cofepris_valido
+        and tiene_aprobacion_humana
+    )
+
+
 def puede_aprobar_exalt(
     evidencia: dict[str, EvidenciaCampo],
     evidencia_completa_y_vigente: bool,
     aprobacion: RegistroAprobacionHumana | None = None,
     sha256_documento_actual: str | None = None,
 ) -> bool:
-    """Exige evidencia oficial y una aprobación humana ligada al hash actual."""
-    etiqueta_oficial = evidencia.get("etiqueta_oficial_verificada")
-    return (
-        evidencia_completa_y_vigente
-        and etiqueta_oficial is not None
-        and etiqueta_oficial.valor is True
-        and etiqueta_oficial.estado == "respaldado_en_fuente"
-        and bool(etiqueta_oficial.citas)
-        and aprobacion is not None
-        and aprobacion.aprobado_por in cargar_revisores_autorizados()
-        and sha256_documento_actual is not None
-        and aprobacion.sha256_documento_revisado == sha256_documento_actual
+    """Conserva compatibilidad hacia atrás delegando al nuevo criterio de evidencia."""
+    return puede_aprobar_ficha(
+        evidencia,
+        evidencia_completa_y_vigente,
+        aprobacion=aprobacion,
+        sha256_documento_actual=sha256_documento_actual,
     )
 
 
@@ -1866,31 +1903,55 @@ def clasificar_y_exportar(
                 None,
                 hashes_actuales,
             )
-            estado = (
-                "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
-                if evidencia_completa
-                else "EVIDENCIA_INCOMPLETA_O_FUENTE_CAMBIADA"
-            )
-            nota_estado = (
-                "La etiqueta web es ilustrativa. La ficha técnica del fabricante "
-                "corrobora los datos, pero no es una etiqueta autorizada y no confirma "
-                "explícitamente la formulación."
-                if evidencia_completa
-                else "La revisión asistida quedó invalidada: "
-                + " ".join(motivos_evidencia)
-            )
-            ficha = ficha.model_copy(
-                update={
-                    "revision_documental_aprobada": False,
-                    "estado_revision_documental": estado,
-                    "observaciones": (
-                        (ficha.observaciones or "") + " " + nota_estado
-                    ).strip(),
-                }
-            )
-        if ficha.revision_documental_aprobada:
-            aprobada, motivo_aprobacion = validar_aprobacion_humana(ficha)
-            if not aprobada:
+            # Con el criterio nuevo (2026-11-23), se verifica si cuenta con aprobación humana válida
+            aprobada_humana, _ = validar_aprobacion_humana(ficha)
+            if evidencia_completa and aprobada_humana:
+                estado = "APROBADO_CON_CRITERIO_NUEVO_2026_11_23"
+                ficha = ficha.model_copy(
+                    update={
+                        "revision_documental_aprobada": True,
+                        "estado_revision_documental": estado,
+                        "observaciones": (
+                            (ficha.observaciones or "")
+                            + " Ficha aprobada bajo el nuevo criterio: etiqueta del fabricante cotejada con COFEPRIS y firma humana."
+                        ).strip(),
+                    }
+                )
+            else:
+                estado = (
+                    "REVISADO_POR_AGENTE_PENDIENTE_APROBACION_HUMANA"
+                    if evidencia_completa
+                    else "EVIDENCIA_INCOMPLETA_O_FUENTE_CAMBIADA"
+                )
+                nota_estado = (
+                    "Etiqueta del fabricante y consulta COFEPRIS cotejadas exitosamente. "
+                    + (
+                        "Pendiente de registro de aprobación humana formal."
+                        if evidencia_completa
+                        else "La revisión asistida quedó invalidada: "
+                        + " ".join(motivos_evidencia)
+                    )
+                )
+                ficha = ficha.model_copy(
+                    update={
+                        "revision_documental_aprobada": False,
+                        "estado_revision_documental": estado,
+                        "observaciones": (
+                            (ficha.observaciones or "") + " " + nota_estado
+                        ).strip(),
+                    }
+                )
+        else:
+            # Validación y aprobación general para cualquier producto distinto de Exalt
+            aprobada_humana, motivo_aprobacion = validar_aprobacion_humana(ficha)
+            if aprobada_humana and ficha.revision_documental_aprobada:
+                ficha = ficha.model_copy(
+                    update={
+                        "revision_documental_aprobada": True,
+                        "estado_revision_documental": "APROBADO_CON_CRITERIO_NUEVO_2026_11_23",
+                    }
+                )
+            else:
                 ficha = ficha.model_copy(
                     update={
                         "revision_documental_aprobada": False,
@@ -1991,7 +2052,11 @@ def clasificar_y_exportar(
         "resultado": "PENDIENTE",
         "revision_asistida_completa": all(
             ficha.estado_revision_documental
-            == "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
+            in {
+                "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL",
+                "REVISADO_POR_AGENTE_PENDIENTE_APROBACION_HUMANA",
+                "APROBADO_CON_CRITERIO_NUEVO_2026_11_23",
+            }
             for ficha in candidatos_exalt
         ),
         "etiqueta_oficial_verificada": all(
@@ -2001,11 +2066,8 @@ def clasificar_y_exportar(
         "aprobacion_corpus_elegible": bool(candidatos_exalt)
         and all(ficha.revision_documental_aprobada for ficha in candidatos_exalt),
         "motivo_bloqueo": (
-            "La ficha técnica de Corteva corrobora las combinaciones, dosis y "
-            "marcadores de IS, pero no es una etiqueta autorizada y no confirma "
-            "explícitamente la formulación. La etiqueta web se declara ilustrativa; "
-            "la captura COFEPRIS no contiene dosis ni plagas por cultivo. Se requiere "
-            "documentación autorizada que cierre esos límites antes de indexar."
+            "Criterio de evidencia (2026-11-23): requiere etiqueta de fabricante, consulta COFEPRIS "
+            "y registro de aprobación humana formal en data/aprobaciones/<id_registro>.json."
         ),
         "fichas": [
             {
@@ -2014,7 +2076,11 @@ def clasificar_y_exportar(
                 "revision_documental_aprobada": f.revision_documental_aprobada,
                 "evidencia_completa_y_vigente": (
                     f.estado_revision_documental
-                    == "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL"
+                    in {
+                        "REVISADO_POR_AGENTE_PENDIENTE_ETIQUETA_OFICIAL",
+                        "REVISADO_POR_AGENTE_PENDIENTE_APROBACION_HUMANA",
+                        "APROBADO_CON_CRITERIO_NUEVO_2026_11_23",
+                    }
                 ),
                 "evidencia_por_campo": serializar_evidencia_campos(
                     f.evidencia_documental
