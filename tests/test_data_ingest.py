@@ -1,5 +1,6 @@
 """Pruebas de evidencia documental asistida y chunks separados para Issue #1."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,11 +19,13 @@ from src.data_ingest import (
     RegistroAprobacionHumana,
     TrazabilidadFuente,
     asegurar_fuente_publica,
+    clasificar_y_exportar,
     construir_evidencia_campos_exalt,
     construir_informe_busqueda_documental_exalt,
     construir_texto_exalt,
     hash_sha256,
     puede_aprobar_exalt,
+    puede_aprobar_ficha,
     serializar_ficha_motor_rag,
     serializar_metadatos_ficha,
     validar_aprobacion_humana,
@@ -534,6 +537,288 @@ class EvidenciaDocumentalExaltTests(unittest.TestCase):
         )
         self.assertFalse(completa)
         self.assertTrue(any("no aparece" in motivo for motivo in motivos))
+
+    def test_criterio_nuevo_aprueba_con_etiqueta_captura_y_aprobacion(self) -> None:
+        """Criterio 2026-11-23: con etiqueta fabricante, captura COFEPRIS y firma humana, pasa a aprobada."""
+        with tempfile.TemporaryDirectory() as directorio:
+            directorio_path = Path(directorio)
+            ruta_aprobaciones = directorio_path / "aprobaciones"
+            ruta_aprobaciones.mkdir(parents=True, exist_ok=True)
+
+            documento_pdf = directorio_path / EXALT_LABEL
+            documento_pdf.write_bytes(b"etiqueta fabricante exalt")
+            hash_doc = hash_sha256(documento_pdf)
+
+            ficha = FichaFitosanitaria(
+                id_registro="FICH-EXALT-LIMONERO-DIAPHORINA-001",
+                cultivo="Limonero",
+                problema_fitosanitario="Diaphorina citri",
+                producto_comercial="Exalt",
+                ingrediente_activo="spinetoram",
+                registro_cofepris="RSCO-INAC-0103X-301-064-006",
+                dosis=DosisEspecificacion(
+                    minima=400.0,
+                    maxima=600.0,
+                    unidad="mL/ha",
+                    texto_etiqueta="400 - 600",
+                ),
+                is_dias=1,
+                texto_fragmento="Texto de prueba",
+                trazabilidad=TrazabilidadFuente(
+                    documento_o_url=str(documento_pdf),
+                    ubicacion_fuente="Página 4",
+                    sha256=hash_doc,
+                ),
+                evidencia_documental=construir_evidencia_campos_exalt(
+                    self.documento, EXALT_COMBINACIONES[0], self.hashes
+                ),
+            )
+
+            aprobacion = RegistroAprobacionHumana(
+                aprobado_por="Dr. Carlos Flores",
+                fecha_aprobacion="2026-11-23",
+                sha256_documento_revisado=hash_doc,
+            )
+            (ruta_aprobaciones / f"{ficha.id_registro}.json").write_text(
+                aprobacion.model_dump_json(),
+                encoding="utf-8",
+            )
+
+            with patch("src.data_ingest.DATA_APPROVALS", ruta_aprobaciones):
+                resultado = clasificar_y_exportar([ficha], directorio_path)
+
+            corpus = json.loads(
+                Path(resultado["ruta_motor_rag"]).read_text(encoding="utf-8")
+            )
+            vademecum = json.loads(
+                Path(resultado["ruta_vademecum"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(corpus), 1)
+            self.assertEqual(len(vademecum), 1)
+            self.assertEqual(corpus[0]["id"], ficha.id_registro)
+            self.assertEqual(vademecum[0]["id_registro"], ficha.id_registro)
+            self.assertTrue(vademecum[0]["revision_documental_aprobada"])
+            self.assertEqual(
+                vademecum[0]["estado_revision_documental"],
+                "APROBADO_CON_CRITERIO_NUEVO_2026_11_23",
+            )
+
+    def test_criterio_nuevo_sin_aprobacion_humana_queda_en_cuarentena(self) -> None:
+        """Sin aprobación humana en data/aprobaciones/, no entra a corpus_motor_rag.json."""
+        with tempfile.TemporaryDirectory() as directorio:
+            directorio_path = Path(directorio)
+            ruta_aprobaciones_vacia = directorio_path / "aprobaciones"
+            ruta_aprobaciones_vacia.mkdir(parents=True, exist_ok=True)
+
+            documento_pdf = directorio_path / EXALT_LABEL
+            documento_pdf.write_bytes(b"etiqueta fabricante exalt")
+            hash_doc = hash_sha256(documento_pdf)
+
+            ficha = FichaFitosanitaria(
+                id_registro="FICH-EXALT-LIMONERO-DIAPHORINA-001",
+                cultivo="Limonero",
+                problema_fitosanitario="Diaphorina citri",
+                producto_comercial="Exalt",
+                ingrediente_activo="spinetoram",
+                registro_cofepris="RSCO-INAC-0103X-301-064-006",
+                dosis=DosisEspecificacion(
+                    minima=400.0,
+                    maxima=600.0,
+                    unidad="mL/ha",
+                    texto_etiqueta="400 - 600",
+                ),
+                is_dias=1,
+                texto_fragmento="Texto de prueba",
+                trazabilidad=TrazabilidadFuente(
+                    documento_o_url=str(documento_pdf),
+                    ubicacion_fuente="Página 4",
+                    sha256=hash_doc,
+                ),
+                evidencia_documental=construir_evidencia_campos_exalt(
+                    self.documento, EXALT_COMBINACIONES[0], self.hashes
+                ),
+            )
+
+            with patch("src.data_ingest.DATA_APPROVALS", ruta_aprobaciones_vacia):
+                resultado = clasificar_y_exportar([ficha], directorio_path)
+
+            corpus = json.loads(
+                Path(resultado["ruta_motor_rag"]).read_text(encoding="utf-8")
+            )
+            pendientes = json.loads(
+                Path(resultado["ruta_pendientes"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(corpus), 0)
+            self.assertEqual(len(pendientes), 1)
+            self.assertEqual(
+                pendientes[0]["estado"],
+                "PENDIENTE_REVISION",
+            )
+            self.assertFalse(pendientes[0]["ficha"]["revision_documental_aprobada"])
+
+    def test_criterio_nuevo_rechaza_por_etiqueta_o_cofepris_ausente(self) -> None:
+        """Rechaza aprobación si falta la etiqueta de fabricante o la consulta COFEPRIS."""
+        evidencia_sin_etiqueta = {
+            "consulta_cofepris_verificada": EvidenciaCampo(
+                valor=True,
+                estado="respaldado_en_fuente",
+                citas=[
+                    CitaEvidencia(
+                        archivo="Consulta_COFEPRIS.png",
+                        sha256="c" * 64,
+                        ubicacion="Detalle",
+                        fragmento="Registro válido",
+                        metodo_verificacion="inspeccion_visual_asistida_por_agente",
+                        alcance="Cofepris",
+                    )
+                ],
+            )
+        }
+        aprobacion = RegistroAprobacionHumana(
+            aprobado_por="Dr. Carlos Flores",
+            fecha_aprobacion="2026-11-23",
+            sha256_documento_revisado="a" * 64,
+        )
+        self.assertFalse(
+            puede_aprobar_ficha(
+                evidencia_sin_etiqueta,
+                True,
+                aprobacion=aprobacion,
+                sha256_documento_actual="a" * 64,
+            )
+        )
+
+        evidencia_sin_citas_cofepris = {
+            "etiqueta_fabricante_verificada": EvidenciaCampo(
+                valor=True,
+                estado="respaldado_en_fuente",
+                citas=[
+                    CitaEvidencia(
+                        archivo="etiqueta.pdf",
+                        sha256="a" * 64,
+                        ubicacion="Página 1",
+                        fragmento="Dosis",
+                        metodo_verificacion="extraccion_textual_pdf",
+                        alcance="Etiqueta",
+                    )
+                ],
+            ),
+            "consulta_cofepris_verificada": EvidenciaCampo(
+                valor=True,
+                estado="respaldado_en_fuente",
+                citas=[],
+            ),
+        }
+        self.assertFalse(
+            puede_aprobar_ficha(
+                evidencia_sin_citas_cofepris,
+                True,
+                aprobacion=aprobacion,
+                sha256_documento_actual="a" * 64,
+            )
+        )
+
+    def test_criterio_nuevo_rechaza_por_hash_alterado_o_revisor_no_autorizado(
+        self,
+    ) -> None:
+        """Rechaza si el hash del documento no coincide o el revisor no está autorizado."""
+        evidencia = {
+            "etiqueta_fabricante_verificada": EvidenciaCampo(
+                valor=True,
+                estado="respaldado_en_fuente",
+                citas=[
+                    CitaEvidencia(
+                        archivo="etiqueta.pdf",
+                        sha256="a" * 64,
+                        ubicacion="Página 1",
+                        fragmento="Dosis",
+                        metodo_verificacion="extraccion_textual_pdf",
+                        alcance="Etiqueta",
+                    )
+                ],
+            )
+        }
+        aprobacion_hash_erroneo = RegistroAprobacionHumana(
+            aprobado_por="Dr. Carlos Flores",
+            fecha_aprobacion="2026-11-23",
+            sha256_documento_revisado="hash-antiguo",
+        )
+        self.assertFalse(
+            puede_aprobar_ficha(
+                evidencia,
+                True,
+                aprobacion=aprobacion_hash_erroneo,
+                sha256_documento_actual="hash-actual",
+            )
+        )
+
+        aprobacion_revisor_invalido = RegistroAprobacionHumana(
+            aprobado_por="Revisor Desconocido",
+            fecha_aprobacion="2026-11-23",
+            sha256_documento_revisado="a" * 64,
+        )
+        self.assertFalse(
+            puede_aprobar_ficha(
+                evidencia,
+                True,
+                aprobacion=aprobacion_revisor_invalido,
+                sha256_documento_actual="a" * 64,
+            )
+        )
+
+    def test_criterio_nuevo_aprueba_ficha_distinta_de_exalt(self) -> None:
+        """Comprueba que una ficha distinta de Exalt se aprueba si reúne las 3 condiciones."""
+        with tempfile.TemporaryDirectory() as directorio:
+            directorio_path = Path(directorio)
+            ruta_aprobaciones = directorio_path / "aprobaciones"
+            ruta_aprobaciones.mkdir(parents=True, exist_ok=True)
+
+            doc_pdf = directorio_path / "Entrust_SC_etiqueta.pdf"
+            doc_pdf.write_bytes(b"etiqueta fabricante entrust")
+            hash_doc = hash_sha256(doc_pdf)
+
+            ficha_otra = FichaFitosanitaria(
+                id_registro="FICH-ENTRUST-MANGO-TRIPS-001",
+                cultivo="Mango",
+                problema_fitosanitario="Frankliniella occidentalis",
+                producto_comercial="Entrust SC",
+                ingrediente_activo="spinosad",
+                registro_cofepris="RSCO-INAC-0101-341-064-023",
+                dosis=DosisEspecificacion(
+                    minima=7.5,
+                    maxima=12.5,
+                    unidad="mL/100L",
+                    texto_etiqueta="7.5 - 12.5 mL/100 L agua",
+                ),
+                is_dias=1,
+                texto_fragmento="Entrust SC para trips en mango",
+                trazabilidad=TrazabilidadFuente(
+                    documento_o_url=str(doc_pdf),
+                    ubicacion_fuente="Página 2",
+                    sha256=hash_doc,
+                ),
+                revision_documental_aprobada=True,
+            )
+
+            aprobacion = RegistroAprobacionHumana(
+                aprobado_por="Dr. Carlos Flores",
+                fecha_aprobacion="2026-11-23",
+                sha256_documento_revisado=hash_doc,
+            )
+            (ruta_aprobaciones / f"{ficha_otra.id_registro}.json").write_text(
+                aprobacion.model_dump_json(),
+                encoding="utf-8",
+            )
+
+            with patch("src.data_ingest.DATA_APPROVALS", ruta_aprobaciones):
+                resultado = clasificar_y_exportar([ficha_otra], directorio_path)
+
+            corpus = json.loads(
+                Path(resultado["ruta_motor_rag"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(corpus), 1)
+            self.assertEqual(corpus[0]["id"], ficha_otra.id_registro)
+            self.assertEqual(corpus[0]["producto_comercial"], "Entrust SC")
 
 
 if __name__ == "__main__":
