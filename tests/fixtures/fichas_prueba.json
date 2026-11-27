@@ -94,5 +94,21 @@
     "fragmento_oficial_citado": "Ficha de prueba con valores nulos para verificar robustez del motor.",
     "fuente_documental": "Fixture de Pruebas Unitarias PhytoRAG",
     "estado_verificacion": "sintetica_prueba"
+  },
+  {
+    "id": "PRUEBA-007",
+    "producto_comercial": "Azadiractina (Ficticio para Prueba Diacríticos)",
+    "ingrediente_activo": "Azadiractina",
+    "registro_sanitario_cofepris": "RSCO-PRUEBA-007",
+    "cultivo": "Limonero",
+    "problema_fitosanitario": "Psílido asiático de los cítricos (Diaphorina citri)",
+    "dosis_autorizada": "1.0 a 1.5 L/ha",
+    "intervalo_seguridad_dias": 0,
+    "aprobado_omri": true,
+    "compatible_exportacion_usda": true,
+    "recomendacion_agronomica": "Aplicación foliar ante presencia de ninfas.",
+    "fragmento_oficial_citado": "Ficha sintética para prueba de diacríticos y acentos.",
+    "fuente_documental": "Fixture de Pruebas Unitarias PhytoRAG",
+    "estado_verificacion": "sintetica_prueba"
   }
 ]

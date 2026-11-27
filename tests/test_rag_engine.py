@@ -1,14 +1,16 @@
 """Pruebas unitarias para el Motor RAG Híbrido (PhytoRAG-Tropical).
 
-Verifica los puntos requeridos por la auditoría técnica de Milestone 1:
+Verifica los puntos requeridos por la auditoría técnica de Milestone 1 y revisión del 23-nov:
 - Normalización y alineación de cultivos con Alumno 1 (Limonero, Mango, Papayo).
 - Carga exclusiva de corpus_motor_rag.json (omisión de archivos de cuarentena).
-- Comportamiento seguro y sin caídas ante corpus vacío o ausente.
-- Filtro estricto por cultivo (anti off-label).
+- Comportamiento seguro ante corpus vacío o ausente.
+- Sin cultivo reconocido o soportado, el motor no recomienda ni elige ficha (ej. aguacate).
+- Comparación sin acentos ni diacríticos en BM25 y filtro de alineación patológica (psilido == psílido).
+- Mensajes de rechazo referencian estrictamente el corpus verificado de PhytoRAG y no catálogos externos.
 - Tolerancia a valores nulos (intervalo de seguridad, dosis, certificaciones).
 - Manejo de 3 estados en regímenes orgánico y exportación (True, False, None/desconocido).
 - Salida estructurada tipada con Pydantic (RecomendacionTratamiento).
-- Guardrail contra cifras numéricas en la narrativa generada por el LLM.
+- Guardrail contra cifras numéricas y números en letra en la narrativa del LLM.
 """
 
 import os
@@ -78,9 +80,59 @@ class TestMotorPhytoRAG(unittest.TestCase):
             self.assertIsInstance(resultado, RecomendacionTratamiento)
             self.assertEqual(resultado.producto_comercial, "No localizado")
             self.assertIn(
-                "No se encontró un registro oficial",
+                "El corpus verificado de PhytoRAG no contiene registros",
                 resultado.recomendacion_agronomica,
             )
+            self.assertEqual(
+                resultado.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
+            )
+
+    def test_sin_cultivo_reconocido_no_recomienda(self):
+        """Valida que sin cultivo reconocido o soportado (ej. aguacate), el motor no recomiende ninguna ficha."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            motor = MotorPhytoRAG(
+                vector_db_path=tmp_path / "chroma_no_crop",
+                corpus_path=FIXTURES_PATH,
+            )
+
+            # 1. Recuperar sin cultivo reconocido devuelve lista vacía
+            docs = motor.recuperar_documentos("antracnosis en aguacate")
+            self.assertEqual(docs, [])
+
+            # 2. Generación sin cultivo reconocido retorna abstención segura sin elegir producto
+            resultado = motor.generar_recomendacion("antracnosis en aguacate", docs)
+            self.assertEqual(resultado.producto_comercial, "No localizado")
+            self.assertIn(
+                "No se identificó un cultivo válido o soportado",
+                resultado.recomendacion_agronomica,
+            )
+            self.assertNotIn("Mango", resultado.recomendacion_agronomica)
+            self.assertEqual(
+                resultado.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
+            )
+
+    def test_comparacion_sin_acentos_diacriticos(self):
+        """Valida que la recuperación funcione idéntica con o sin acentos (psílido == psilido)."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            motor = MotorPhytoRAG(
+                vector_db_path=tmp_path / "chroma_accents",
+                corpus_path=FIXTURES_PATH,
+            )
+
+            # Consulta con acentos
+            docs_con_acento = motor.recuperar_documentos("psílido en limón")
+            # Consulta sin acentos
+            docs_sin_acento = motor.recuperar_documentos("psilido en limon")
+
+            self.assertGreaterEqual(len(docs_con_acento), 1)
+            self.assertGreaterEqual(len(docs_sin_acento), 1)
+            self.assertEqual(
+                docs_con_acento[0].id_documento,
+                docs_sin_acento[0].id_documento,
+            )
+            self.assertEqual(docs_con_acento[0].id_documento, "PRUEBA-007")
 
     def test_archivos_cuarentena_no_se_indexan(self):
         """Verifica que el motor lea únicamente corpus_motor_rag.json e ignore archivos de cuarentena."""
@@ -157,11 +209,19 @@ class TestMotorPhytoRAG(unittest.TestCase):
                 "Cancro en mango", docs_limon, cultivo="mango"
             )
             self.assertEqual(
-                resultado.producto_comercial, "No autorizado para este cultivo"
+                resultado.producto_comercial,
+                "No autorizado para este cultivo en corpus",
             )
             self.assertIn(
                 "RECHAZO REGULATORIO (OFF-LABEL)",
                 resultado.recomendacion_agronomica,
+            )
+            self.assertIn(
+                "El corpus verificado de PhytoRAG no contiene",
+                resultado.recomendacion_agronomica,
+            )
+            self.assertEqual(
+                resultado.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
             )
 
     def test_alineacion_nombres_cultivo(self):
@@ -228,7 +288,12 @@ class TestMotorPhytoRAG(unittest.TestCase):
             )
             self.assertIsNone(res_org.aprobacion_organica_omri)
             self.assertIn("INFORMACIÓN NO VERIFICADA", res_org.recomendacion_agronomica)
-            self.assertNotIn("química convencional", res_org.recomendacion_agronomica)
+            self.assertIn(
+                "El corpus verificado de PhytoRAG", res_org.recomendacion_agronomica
+            )
+            self.assertEqual(
+                res_org.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
+            )
 
             # 2. Régimen exportación USDA con valor desconocido
             res_usda = motor.generar_recomendacion(
@@ -245,8 +310,11 @@ class TestMotorPhytoRAG(unittest.TestCase):
             self.assertIn(
                 "INFORMACIÓN NO VERIFICADA", res_usda.recomendacion_agronomica
             )
-            self.assertNotIn(
-                "no cuentan con tolerancia", res_usda.recomendacion_agronomica
+            self.assertIn(
+                "El corpus verificado de PhytoRAG", res_usda.recomendacion_agronomica
+            )
+            self.assertEqual(
+                res_usda.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
             )
 
     def test_regimen_rechazo_explicito(self):
@@ -271,6 +339,12 @@ class TestMotorPhytoRAG(unittest.TestCase):
             )
             self.assertFalse(res_org.aprobacion_organica_omri)
             self.assertIn("RECHAZO REGULATORIO", res_org.recomendacion_agronomica)
+            self.assertIn(
+                "corpus verificado de PhytoRAG", res_org.recomendacion_agronomica
+            )
+            self.assertEqual(
+                res_org.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
+            )
 
             # Rechazo exportación USDA explícito
             res_usda = motor.generar_recomendacion(
@@ -284,9 +358,15 @@ class TestMotorPhytoRAG(unittest.TestCase):
                 "RECHAZO POR NORMATIVA DE EXPORTACIÓN",
                 res_usda.recomendacion_agronomica,
             )
+            self.assertIn(
+                "corpus verificado de PhytoRAG", res_usda.recomendacion_agronomica
+            )
+            self.assertEqual(
+                res_usda.fuente_documental, "Corpus Verificado PhytoRAG-Tropical"
+            )
 
     def test_guardrail_narrativa_prohibe_cifras(self):
-        """Verifica que si el LLM incluye cifras o dosis en su narrativa, el guardrail la descarte."""
+        """Verifica que si el LLM incluye cifras o dosis en su narrativa (numérica o con letra), el guardrail la descarte."""
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
             tmp_path = Path(tmp_dir)
             motor = MotorPhytoRAG(
@@ -295,16 +375,15 @@ class TestMotorPhytoRAG(unittest.TestCase):
             )
             docs = motor.recuperar_documentos("Cenicilla en mango", cultivo="mango")
 
-            mock_response = MagicMock()
-            mock_response.text = (
+            # Caso A: Cifras numéricas
+            mock_response_num = MagicMock()
+            mock_response_num.text = (
                 "Recomiendo aplicar 4.5 kg/ha de este producto cada 10 días."
             )
-
-            mock_client = MagicMock()
-            mock_client.models.generate_content.return_value = mock_response
-
+            mock_client_num = MagicMock()
+            mock_client_num.models.generate_content.return_value = mock_response_num
             mock_genai_mod = MagicMock()
-            mock_genai_mod.Client.return_value = mock_client
+            mock_genai_mod.Client.return_value = mock_client_num
 
             with (
                 unittest.mock.patch.dict(
@@ -314,13 +393,38 @@ class TestMotorPhytoRAG(unittest.TestCase):
                     "sys.modules", {"google.genai": mock_genai_mod}
                 ),
             ):
-                resultado = motor.generar_recomendacion(
+                res_num = motor.generar_recomendacion(
                     "Cenicilla en mango", docs, cultivo="mango"
                 )
 
-            self.assertNotIn("4.5 kg/ha", resultado.recomendacion_agronomica)
+            self.assertNotIn("4.5 kg/ha", res_num.recomendacion_agronomica)
             self.assertEqual(
-                resultado.recomendacion_agronomica,
+                res_num.recomendacion_agronomica,
+                docs[0].metadatos["recomendacion_agronomica"],
+            )
+
+            # Caso B: Cifras en letra
+            mock_response_letra = MagicMock()
+            mock_response_letra.text = (
+                "Recomiendo aplicar dos litros por hectárea cada quince días."
+            )
+            mock_client_num.models.generate_content.return_value = mock_response_letra
+
+            with (
+                unittest.mock.patch.dict(
+                    "os.environ", {"GEMINI_API_KEY": "AIzaSyPruebaValida123456789"}
+                ),
+                unittest.mock.patch.dict(
+                    "sys.modules", {"google.genai": mock_genai_mod}
+                ),
+            ):
+                res_letra = motor.generar_recomendacion(
+                    "Cenicilla en mango", docs, cultivo="mango"
+                )
+
+            self.assertNotIn("dos litros", res_letra.recomendacion_agronomica)
+            self.assertEqual(
+                res_letra.recomendacion_agronomica,
                 docs[0].metadatos["recomendacion_agronomica"],
             )
 
